@@ -36,14 +36,12 @@ from torch.utils.data.sampler import BatchSampler, Sampler
 from litdata.constants import _DEFAULT_CHUNK_BYTES, _VIZ_TRACKER_AVAILABLE
 from litdata.debugger import _get_log_msg
 from litdata.streaming import Cache
-from litdata.streaming.combined import (
-    __NUM_SAMPLES_YIELDED_KEY__,
-    __SAMPLES_KEY__,
-    CombinedStreamingDataset,
-)
+from litdata.streaming.combined import CombinedStreamingDataset
 from litdata.streaming.dataset import StreamingDataset
+from litdata.streaming.parallel import ParallelStreamingDataset
 from litdata.streaming.sampler import CacheBatchSampler
 from litdata.utilities._pytree import tree_flatten
+from litdata.utilities.base import __NUM_SAMPLES_YIELDED_KEY__, __SAMPLES_KEY__
 from litdata.utilities.env import _DistributedEnv
 
 logger = logging.getLogger("litdata.streaming.dataloader")
@@ -567,7 +565,7 @@ class StreamingDataLoader(DataLoader):
 
     def __init__(
         self,
-        dataset: Union[StreamingDataset, CombinedStreamingDataset],
+        dataset: Union[StreamingDataset, CombinedStreamingDataset, ParallelStreamingDataset],
         *args: Any,
         batch_size: int = 1,
         num_workers: int = 0,
@@ -580,7 +578,7 @@ class StreamingDataLoader(DataLoader):
         collate_fn: Optional[Callable] = None,
         **kwargs: Any,
     ) -> None:  # pyright: ignore
-        if not isinstance(dataset, (StreamingDataset, CombinedStreamingDataset)):
+        if not isinstance(dataset, (StreamingDataset, CombinedStreamingDataset, ParallelStreamingDataset)):
             raise RuntimeError(
                 "The provided dataset should be either an instance of StreamingDataset or CombinedStreamingDataset."
                 f" Found {dataset}."
