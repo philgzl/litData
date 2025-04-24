@@ -113,9 +113,6 @@ class _BaseStreamingDatasetWrapper(IterableDataset, ABC):
         if self._use_streaming_dataloader:
             self._num_samples_yielded = state_dict["num_samples_yielded"]
 
-    def __len__(self) -> Optional[int]:
-        return self.get_len(1, 1)
-
     def _get_len(self, d: Any) -> int:
         if isinstance(d, StreamingDataset):
             return d.get_len(self.num_workers, self.batch_size)
@@ -123,6 +120,9 @@ class _BaseStreamingDatasetWrapper(IterableDataset, ABC):
 
     @abstractmethod
     def get_len(self, num_workers: int, batch_size: int) -> Optional[int]: ...
+
+    @abstractmethod
+    def __len__(self) -> Optional[int]: ...
 
 
 class _BaseDatasetWrapperIterator(Iterator, ABC):

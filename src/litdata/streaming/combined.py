@@ -113,6 +113,9 @@ class CombinedStreamingDataset(_BaseStreamingDatasetWrapper):
             return self._get_total_length()
         return None
 
+    def __len__(self) -> Optional[int]:
+        return self.get_len(1, 1)
+
     # total length of the datasets
     def _get_total_length(self) -> int:
         return sum(self._get_len(d) for d in self._datasets)
