@@ -72,8 +72,9 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
     def get_len(self, num_workers: int, batch_size: int) -> Optional[int]:
         self.num_workers = num_workers
         self.batch_size = batch_size
+        lengths = [self._get_len(d) for d in self._datasets]
         if self._length is None:
-            return min(self._get_len(d) for d in self._datasets)
+            return min(lengths)
         if self._length == float("inf"):
             return None
         if isinstance(self._length, int):
@@ -96,6 +97,9 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         )
         return self._iterator
 
+    def __len__(self) -> int:
+        return self.get_len(self.num_workers, self.batch_size if self.batch_size else 1)
+
 
 class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
     def __init__(
@@ -116,7 +120,7 @@ class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
         if self._length is not None and self._count >= self._length:
             raise StopIteration
         samples, _resets = zip(*[self._get_sample(i) for i in range(len(self._datasets))])
-        # update _num_samples_yielded only if samples were fetched from all datasets
+        # update _num_samples_yielded only if samples were successfully fetched from all datasets
         for i, _reset in enumerate(_resets):
             self._num_samples_yielded[i] = 1 if _reset else self._num_samples_yielded[i] + 1
         self._count += 1
@@ -134,8 +138,6 @@ class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
         except StopIteration as e:
             if self._length is None:
                 raise e
-            # TODO: the dataset is not shuffled when starting a new internal cycle
-            # to support this we need to save an internal epoch counter for each dataset and save it in the state dict
             self._dataset_iters[dataset_index] = iter(self._datasets[dataset_index])
             _reset = True
             try:

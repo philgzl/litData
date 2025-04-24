@@ -611,7 +611,7 @@ class StreamingDataLoader(DataLoader):
         self._profile_skip_batches = profile_skip_batches
         self._profile_dir = profile_dir
         self._num_samples_yielded_streaming = 0
-        self._num_samples_yielded_combined: Dict[int, List[Any]] = {}
+        self._num_samples_yielded_wrapper: Dict[int, List[Any]] = {}
         self.rng_state: Optional[Any] = None
         self._worker_idx = cycle(list(range(self.num_workers if self.num_workers > 0 else 1)))
         self._worker_idx_iter: Optional[Any] = None
@@ -633,7 +633,7 @@ class StreamingDataLoader(DataLoader):
             self._worker_idx = cycle(list(range(self.num_workers if self.num_workers > 0 else 1)))
             self._worker_idx_iter = iter(self._worker_idx)
             self.current_epoch += 1
-            self._num_samples_yielded_combined = {}
+            self._num_samples_yielded_wrapper = {}
             self._num_samples_yielded_streaming = 0
             self.dataset.reset_state_dict()
 
@@ -653,7 +653,7 @@ class StreamingDataLoader(DataLoader):
             for batch in super().__iter__():
                 self._latest_worker_idx = next(self._worker_idx_iter)  # type: ignore
                 if isinstance(batch, dict) and __NUM_SAMPLES_YIELDED_KEY__ in batch:
-                    self._num_samples_yielded_combined[self._latest_worker_idx] = [
+                    self._num_samples_yielded_wrapper[self._latest_worker_idx] = [
                         sample[-1].item() if self.batch_size > 1 else sample.item()
                         for sample in batch[__NUM_SAMPLES_YIELDED_KEY__]
                     ]
@@ -689,15 +689,15 @@ class StreamingDataLoader(DataLoader):
         # initialize a list to track the number of samples yielded for each dataset
         num_samples_yieled = [0 for _ in range(len(self.dataset._datasets))]
 
-        for worker_idx in self._num_samples_yielded_combined:
-            for dataset_idx, samples_yieled in enumerate(self._num_samples_yielded_combined[worker_idx]):
+        for worker_idx in self._num_samples_yielded_wrapper:
+            for dataset_idx, samples_yieled in enumerate(self._num_samples_yielded_wrapper[worker_idx]):
                 num_samples_yieled[dataset_idx] += samples_yieled
 
         return {
             "dataset": self.dataset.state_dict(self.num_workers, self.batch_size, num_samples_yieled),
             "current_epoch": self.current_epoch,
             "latest_worker_idx": self._latest_worker_idx,
-            "num_samples_yielded": deepcopy(self._num_samples_yielded_combined),
+            "num_samples_yielded": deepcopy(self._num_samples_yielded_wrapper),
         }
 
     def load_state_dict(self, obj: Dict[str, Any]) -> None:
@@ -714,7 +714,7 @@ class StreamingDataLoader(DataLoader):
         if isinstance(self.dataset, StreamingDataset):
             self._num_samples_yielded_streaming = obj["num_samples_yielded"]
         else:
-            self._num_samples_yielded_combined = obj["num_samples_yielded"]
+            self._num_samples_yielded_wrapper = obj["num_samples_yielded"]
 
         # Used to restart on the next DataLoader worker from the previous run.
         self._latest_worker_idx = obj["latest_worker_idx"] + 1
@@ -730,7 +730,7 @@ class StreamingDataLoader(DataLoader):
             self.dataset._set_use_streaming_dataloader(True)
             self.dataset.load_state_dict(obj)
 
-            total_samples_yielded = sum([sum(samples) for samples in self._num_samples_yielded_combined.values()])
+            total_samples_yielded = sum([sum(samples) for samples in self._num_samples_yielded_wrapper.values()])
 
             # Check if we need to restore for the case without weights.
             if (
@@ -744,6 +744,18 @@ class StreamingDataLoader(DataLoader):
             # Note: `len` is not available for CombinedStreamingDataset in case of provided weights.
             # TODO: handle the case with weights.
             if not self.dataset._iterate_over_all:
+                self.restore = True
+
+        elif isinstance(self.dataset, ParallelStreamingDataset):
+            self.dataset._set_use_streaming_dataloader(True)
+            self.dataset.load_state_dict(obj)
+            # sum samples across workers for each dataset
+            samples_yielded_per_dset = [sum(samples) for samples in zip(*self._num_samples_yielded_wrapper.values())]
+            if any(samples > 0 for samples in samples_yielded_per_dset) and (
+                isinstance(self.dataset._length, (int, float))  # can be float("inf")
+                or self.dataset._length is None
+                and any(samples < len(self.dataset) for samples in samples_yielded_per_dset)
+            ):
                 self.restore = True
 
         elif isinstance(self.dataset, StreamingDataset):
