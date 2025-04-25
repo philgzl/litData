@@ -18,22 +18,26 @@ class BenchmarkArgs:
     """Arguments for the LitData benchmark."""
 
     pr_number: int
+    branch: str
     org: Optional[str]
     user: Optional[str]
     teamspace: str
     machine: Machine
+    make_args: str
 
 
 def parse_args() -> BenchmarkArgs:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Benchmark LitData in CI.")
     parser.add_argument("--pr", type=int, required=True, help="GitHub PR number")
+    parser.add_argument("--branch", type=str, required=True, help="GitHub PR branch name")
     parser.add_argument("--user", default=DEFAULT_USER, type=str, help="Lightning Studio username")
     parser.add_argument("--org", default=DEFAULT_ORG, type=str, help="Lightning Studio org")
     parser.add_argument("--teamspace", default=DEFAULT_TEAMSPACE, type=str, help="Lightning Studio teamspace")
     parser.add_argument(
         "--machine", type=str, default=DEFAULT_MACHINE, choices=["A10G", "T4", "CPU"], help="Machine type"
     )
+    parser.add_argument("--make-args", type=str, default="", help="Makefile variables passed to the script")
 
     args = parser.parse_args()
 
@@ -45,10 +49,12 @@ def parse_args() -> BenchmarkArgs:
 
     return BenchmarkArgs(
         pr_number=args.pr,
+        branch=args.branch,
         user=args.user,
         org=args.org,
         teamspace=args.teamspace,
         machine=machine_map[args.machine],
+        make_args=args.make_args,
     )
 
 
@@ -63,10 +69,12 @@ class LitDataBenchmark:
             raise ValueError("Only one of user or org must be provided.")
 
         self.pr = config.pr_number
+        self.branch = config.branch
         self.teamspace = config.teamspace
         self.user = config.user
         self.org = config.org
         self.machine = config.machine
+        self.make_args = config.make_args
         self.studio: Optional[Studio] = None
 
     def run(self) -> None:
@@ -88,15 +96,21 @@ class LitDataBenchmark:
             org=self.org,
         )
         self.studio.start(self.machine)
+        cmd = "rm -rf lit*(N)"
+        output, output_code = self.studio.run_with_exit_code(cmd)
+        if output_code != 0:
+            raise RuntimeError(f"Command failed:\n{cmd}\nExit code {output_code}:\n{output}")
 
     def setup_litdata_pr(self) -> None:
         """Set up the LitData PR in the studio."""
         assert self.studio is not None, "Studio is not set up"
+
+        # don't use `gh` cli, as it requires to login
         commands = [
-            "rm -rf lit*",
             "git clone https://github.com/Lightning-AI/litData.git",
             "cd litData",
-            f"gh pr checkout {self.pr}",
+            f"git fetch origin pull/{self.pr}/head:{self.branch}",
+            f"git checkout {self.branch}",
             "make setup",
         ]
         final_command = " && ".join(commands)
@@ -111,7 +125,7 @@ class LitDataBenchmark:
         commands = [
             "git clone https://github.com/bhimrazy/litdata-benchmark.git",
             "cd litdata-benchmark",
-            "make benchmark",
+            f"make benchmark {self.make_args}",
         ]
         final_command = " && ".join(commands)
         print(f"Running command: {final_command}")
