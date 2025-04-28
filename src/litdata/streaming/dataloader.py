@@ -633,9 +633,10 @@ class StreamingDataLoader(DataLoader):
             self._worker_idx = cycle(list(range(self.num_workers if self.num_workers > 0 else 1)))
             self._worker_idx_iter = iter(self._worker_idx)
             self.current_epoch += 1
-            self._num_samples_yielded_wrapper = {}
             self._num_samples_yielded_streaming = 0
-            self.dataset.reset_state_dict()
+            if not isinstance(self.dataset, ParallelStreamingDataset) or self.dataset._length is None:
+                self._num_samples_yielded_wrapper = {}
+                self.dataset.reset_state_dict()
 
         self.dataset.set_epoch(self.current_epoch)
         logger.debug(_get_log_msg({"name": "iterating_dataloader", "ph": "B"}))
@@ -661,6 +662,12 @@ class StreamingDataLoader(DataLoader):
                     yield batch[__SAMPLES_KEY__]
                 else:
                     yield batch
+
+        # For ParallelStreamingDataset with _length != None we want to cycle the wrapped datasets i.e. we do not want to
+        # restart at index 0 at every epoch. So we set them in restore state.
+        if isinstance(self.dataset, ParallelStreamingDataset) and self.dataset._length is not None:
+            self.load_state_dict(self.state_dict())
+
         logger.debug(_get_log_msg({"name": "iterating_dataloader", "ph": "E"}))
         self.restore = False
 

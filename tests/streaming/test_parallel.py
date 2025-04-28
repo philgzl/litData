@@ -172,6 +172,10 @@ class DummyIterableDataset(IterableDataset):
     def state_dict(self, **kwargs):
         return kwargs
 
+    def load_state_dict(self, state_dict) -> None:
+        if state_dict:
+            self._state_dict = state_dict
+
     def set_epoch(self, current_epoch):
         pass
 
@@ -354,8 +358,7 @@ def test_parallel_dataset_dataloader_states_partial_iterations(parallel_dataset,
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="too slow in CI")
-@pytest.mark.parametrize("length", [None])
-def test_parallel_dataset_with_dataloader_2_epochs(tmpdir, length):
+def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
     data_dir_1 = os.path.join(tmpdir, "data_1")
     data_dir_2 = os.path.join(tmpdir, "data_2")
     cache_dir_1 = os.path.join(tmpdir, "cache_dir_1")
@@ -384,7 +387,7 @@ def test_parallel_dataset_with_dataloader_2_epochs(tmpdir, length):
 
     dataset1 = StreamingDataset(input_dir=Dir(cache_dir_1, data_dir_1), shuffle=True)
     dataset2 = StreamingDataset(input_dir=Dir(cache_dir_2, data_dir_2), shuffle=True)
-    dataset = ParallelStreamingDataset(datasets=[dataset1, dataset2], length=length)
+    dataset = ParallelStreamingDataset(datasets=[dataset1, dataset2], length=None)
     dataloader = StreamingDataLoader(dataset, num_workers=3, batch_size=2)
 
     assert dataset1.current_epoch == 1
@@ -436,14 +439,13 @@ def test_parallel_dataset_with_dataloader_2_epochs(tmpdir, length):
         {0: [4, 4], 1: [2, 2], 2: [2, 2]},
         {0: [4, 4], 1: [4, 4], 2: [2, 2]},
         {0: [4, 4], 1: [4, 4], 2: [4, 4]},
-        {0: [6, 6], 1: [4, 4], 2: [4, 4]},
     ]
-    expected_current_epoch = [1, 1, 1, 1, 1, 1, 1]
-    dataset_1_current_epoch = [1, 1, 1, 1, 1, 1, 1]
-    dataset_2_current_epoch = [1, 1, 1, 1, 1, 1, 1]
-    expected_latest_worker_idx = [0, 1, 2, 0, 1, 2, 0]
-    expected_dataset0_samples_yielded = [2, 4, 6, 8, 10, 12, 14]
-    expected_dataset1_samples_yielded = [2, 4, 6, 8, 10, 12, 14]
+    expected_current_epoch = [1, 1, 1, 1, 1, 1]
+    dataset_1_current_epoch = [1, 1, 1, 1, 1, 1]
+    dataset_2_current_epoch = [1, 1, 1, 1, 1, 1]
+    expected_latest_worker_idx = [0, 1, 2, 0, 1, 2]
+    expected_dataset0_samples_yielded = [2, 4, 6, 8, 10, 12]
+    expected_dataset1_samples_yielded = [2, 4, 6, 8, 10, 12]
 
     batches_1 = []
 
@@ -475,14 +477,181 @@ def test_parallel_dataset_with_dataloader_2_epochs(tmpdir, length):
         {0: [4, 4], 1: [2, 2], 2: [2, 2]},
         {0: [4, 4], 1: [4, 4], 2: [2, 2]},
         {0: [4, 4], 1: [4, 4], 2: [4, 4]},
-        {0: [6, 6], 1: [4, 4], 2: [4, 4]},
     ]
-    expected_current_epoch = [2, 2, 2, 2, 2, 2, 2]
-    dataset_1_current_epoch = [2, 2, 2, 2, 2, 2, 2]
-    dataset_2_current_epoch = [2, 2, 2, 2, 2, 2, 2]
+    expected_current_epoch = [2, 2, 2, 2, 2, 2]
+    dataset_1_current_epoch = [2, 2, 2, 2, 2, 2]
+    dataset_2_current_epoch = [2, 2, 2, 2, 2, 2]
+    expected_latest_worker_idx = [0, 1, 2, 0, 1, 2]
+    expected_dataset0_samples_yielded = [2, 4, 6, 8, 10, 12]
+    expected_dataset1_samples_yielded = [2, 4, 6, 8, 10, 12]
+    for idx, batch in enumerate(dataloader):
+        batches_2.append(batch)
+        curr_state_dict = dataloader.state_dict()
+
+        expected_dataset_state["num_samples_yielded"] = expected_num_samples_yielded[idx]
+        expected_dataset_state["current_epoch"] = expected_current_epoch[idx]
+        expected_dataset_state["latest_worker_idx"] = expected_latest_worker_idx[idx]
+        expected_dataset_state["dataset"]["0"]["num_samples_yielded"] = expected_dataset0_samples_yielded[idx]
+        expected_dataset_state["dataset"]["1"]["num_samples_yielded"] = expected_dataset1_samples_yielded[idx]
+        expected_dataset_state["dataset"]["0"]["current_epoch"] = dataset_1_current_epoch[idx]
+        expected_dataset_state["dataset"]["1"]["current_epoch"] = dataset_2_current_epoch[idx]
+
+        assert curr_state_dict == expected_dataset_state
+
+        if idx == 2:
+            saved_dataloader_state_dict = deepcopy(curr_state_dict)
+
+    assert dataset1.current_epoch == 2
+    assert dataset2.current_epoch == 2
+
+    assert len(batches_1) == len(batches_2)
+    assert any(not torch.equal(x1, x2) for b1, b2 in zip(batches_1, batches_2) for x1, x2 in zip(b1, b2))
+
+    assert saved_dataloader_state_dict is not None
+    dataloader.load_state_dict(saved_dataloader_state_dict)
+
+    assert dataloader.restore
+
+    batches_23 = []
+    states_23 = []
+    for batch in dataloader:
+        batches_23.append(batch)
+        states_23.append(dataloader.state_dict())
+
+    assert len(batches_2[3:]) == len(batches_23)
+    assert all(torch.equal(x1, x2) for b1, b2 in zip(batches_2[3:], batches_23) for x1, x2 in zip(b1, b2))
+    assert states_23[0]["current_epoch"] == 2
+
+    assert not dataloader.restore
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="too slow in CI")
+def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmpdir):
+    data_dir_1 = os.path.join(tmpdir, "data_1")
+    data_dir_2 = os.path.join(tmpdir, "data_2")
+    cache_dir_1 = os.path.join(tmpdir, "cache_dir_1")
+    cache_dir_2 = os.path.join(tmpdir, "cache_dir_2")
+
+    os.makedirs(data_dir_1)
+    os.makedirs(data_dir_2)
+    os.makedirs(cache_dir_1)
+    os.makedirs(cache_dir_2)
+
+    cache = Cache(input_dir=str(data_dir_1), chunk_size=2)
+
+    for i in range(18):
+        cache[i] = i
+
+    cache.done()
+    cache.merge()
+
+    cache = Cache(input_dir=str(data_dir_2), chunk_size=2)
+
+    for i in range(20):
+        cache[i] = -i
+
+    cache.done()
+    cache.merge()
+
+    dataset1 = StreamingDataset(input_dir=Dir(cache_dir_1, data_dir_1), shuffle=True)
+    dataset2 = StreamingDataset(input_dir=Dir(cache_dir_2, data_dir_2), shuffle=True)
+    dataset = ParallelStreamingDataset(datasets=[dataset1, dataset2], length=12)
+    dataloader = StreamingDataLoader(dataset, num_workers=3, batch_size=2)
+
+    assert dataset1.current_epoch == 1
+    assert dataset2.current_epoch == 1
+
+    expected_dataset_state = {
+        "dataset": {
+            "0": {
+                "num_samples_yielded": 0,
+                "num_workers": 3,
+                "batch_size": 2,
+                "current_epoch": 1,
+                "input_dir_path": ANY,
+                "input_dir_url": ANY,
+                "cache_dir_path": None,
+                "item_loader": None,
+                "drop_last": False,
+                "seed": 42,
+                "world_size": 1,
+                "shuffle": True,
+                "subsampled_files": ANY,
+                "region_of_interest": ANY,
+            },
+            "1": {
+                "num_samples_yielded": 0,
+                "num_workers": 3,
+                "batch_size": 2,
+                "current_epoch": 1,
+                "input_dir_path": ANY,
+                "input_dir_url": ANY,
+                "cache_dir_path": None,
+                "item_loader": None,
+                "drop_last": False,
+                "seed": 42,
+                "world_size": 1,
+                "shuffle": True,
+                "subsampled_files": ANY,
+                "region_of_interest": ANY,
+            },
+        },
+        "current_epoch": 1,
+        "latest_worker_idx": 0,
+        "num_samples_yielded": {},
+    }
+    expected_num_samples_yielded = [
+        {0: [2, 2]},
+        {0: [2, 2], 1: [2, 2]},
+        {0: [2, 2], 1: [2, 2], 2: [2, 2]},
+        {0: [4, 4], 1: [2, 2], 2: [2, 2]},
+        {0: [4, 4], 1: [4, 4], 2: [2, 2]},
+        {0: [4, 4], 1: [4, 4], 2: [4, 4]},
+    ]
+    expected_current_epoch = [1, 1, 1, 1, 1, 1]
+    dataset_1_current_epoch = [1, 1, 1, 1, 1, 1]
+    dataset_2_current_epoch = [1, 1, 1, 1, 1, 1]
+    expected_latest_worker_idx = [0, 1, 2, 0, 1, 2]
+    expected_dataset0_samples_yielded = [2, 4, 6, 8, 10, 12]
+    expected_dataset1_samples_yielded = [2, 4, 6, 8, 10, 12]
+
+    batches_1 = []
+
+    for idx, batch in enumerate(dataloader):
+        batches_1.append(batch)
+        curr_state_dict = dataloader.state_dict()
+
+        expected_dataset_state["num_samples_yielded"] = expected_num_samples_yielded[idx]
+        expected_dataset_state["current_epoch"] = expected_current_epoch[idx]
+        expected_dataset_state["latest_worker_idx"] = expected_latest_worker_idx[idx]
+        expected_dataset_state["dataset"]["0"]["num_samples_yielded"] = expected_dataset0_samples_yielded[idx]
+        expected_dataset_state["dataset"]["1"]["num_samples_yielded"] = expected_dataset1_samples_yielded[idx]
+        expected_dataset_state["dataset"]["0"]["current_epoch"] = dataset_1_current_epoch[idx]
+        expected_dataset_state["dataset"]["1"]["current_epoch"] = dataset_2_current_epoch[idx]
+
+        assert curr_state_dict == expected_dataset_state
+
+    assert dataset1.current_epoch == 1
+    assert dataset2.current_epoch == 1
+
+    saved_dataloader_state_dict = None
+
+    batches_2 = []
+
+    expected_num_samples_yielded = [
+        {0: [6, 6], 1: [4, 4], 2: [4, 4]},
+        {0: [6, 6], 1: [6, 6], 2: [4, 4]},
+        {0: [6, 6], 1: [6, 6], 2: [6, 6]},
+        {0: [2, 8], 1: [6, 6], 2: [6, 6]},
+        {0: [2, 8], 1: [2, 2], 2: [6, 6]},
+        {0: [2, 8], 1: [2, 2], 2: [2, 2]},
+    ]
+    expected_current_epoch = [2, 2, 2, 2, 2, 2]
+    dataset_1_current_epoch = [1, 1, 1, 2, 2, 2]
+    dataset_2_current_epoch = [1, 1, 1, 1, 2, 2]
     expected_latest_worker_idx = [0, 1, 2, 0, 1, 2, 0]
-    expected_dataset0_samples_yielded = [2, 4, 6, 8, 10, 12, 14]
-    expected_dataset1_samples_yielded = [2, 4, 6, 8, 10, 12, 14]
+    expected_dataset0_samples_yielded = [14, 16, 18, 2, 4, 6]
+    expected_dataset1_samples_yielded = [14, 16, 18, 20, 2, 4]
     for idx, batch in enumerate(dataloader):
         batches_2.append(batch)
         curr_state_dict = dataloader.state_dict()
