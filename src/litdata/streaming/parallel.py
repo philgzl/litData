@@ -12,10 +12,11 @@
 # limitations under the License.
 
 import logging
-from typing import Any, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from litdata.streaming.dataset import StreamingDataset
 from litdata.utilities.base import (
+    __NUM_CYCLES_KEY__,
     __NUM_SAMPLES_YIELDED_KEY__,
     __SAMPLES_KEY__,
     _BaseDatasetWrapperIterator,
@@ -65,6 +66,7 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         self._iterator: Optional[_ParallelDatasetIterator] = None
         self._use_streaming_dataloader = False
         self._num_samples_yielded: Optional[List[int]] = None
+        self._num_cycles: Optional[List[int]] = None
         self._current_epoch = 0
         self.num_workers = 1
         self.batch_size = 1
@@ -88,17 +90,39 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         if self._num_samples_yielded is not None and worker_env.rank in self._num_samples_yielded:
             num_samples_yielded = self._num_samples_yielded.get(worker_env.rank, 0)
 
+        num_cycles = None
+        if self._num_cycles is not None and worker_env.rank in self._num_cycles:
+            num_cycles = self._num_cycles.get(worker_env.rank, 0)
+
         length = self._length
         if length not in [None, float("inf")]:
             length = self._length // worker_env.world_size + (worker_env.rank < self._length % worker_env.world_size)
 
         self._iterator = _ParallelDatasetIterator(
-            self._datasets, self._use_streaming_dataloader, num_samples_yielded, length
+            self._datasets, self._use_streaming_dataloader, num_samples_yielded, num_cycles, length
         )
         return self._iterator
 
     def __len__(self) -> int:
         return self.get_len(self.num_workers, self.batch_size if self.batch_size else 1)
+
+    def _get_samples_yielded(
+        self, num_samples_yielded: Dict[int, List[int]], num_cycles: Dict[int, List[int]]
+    ) -> List[int]:
+        assert num_samples_yielded.keys() == num_cycles.keys()
+        assert all(len(s) == len(c) for s, c in zip(num_samples_yielded.values(), num_cycles.values()))
+        output = [0 for _ in range(len(self._datasets))]
+        for i, (num_samples_yielded, num_cycles) in enumerate(
+            zip(zip(*num_samples_yielded.values()), zip(*num_cycles.values()))
+        ):
+            max_num_cycles = max(num_cycles)
+            output[i] = sum(s for (s, c) in zip(num_samples_yielded, num_cycles) if c == max_num_cycles)
+        return output
+
+    def load_state_dict(self, state_dict):
+        super().load_state_dict(state_dict)
+        if self._use_streaming_dataloader:
+            self._num_cycles = state_dict["num_cycles"]
 
 
 class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
@@ -107,11 +131,13 @@ class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
         datasets: List[StreamingDataset],
         use_streaming_dataloader: bool,
         num_samples_yielded: Any,
+        num_cycles: Any,
         length: Optional[int | float] = None,
     ) -> None:
         self._datasets = datasets
         self._dataset_iters = [iter(dataset) for dataset in datasets]
         self._num_samples_yielded = num_samples_yielded or [0 for _ in range(len(datasets))]
+        self._num_cycles = num_cycles or [0 for _ in range(len(datasets))]
         self._length = length
         self._use_streaming_dataloader = use_streaming_dataloader
         self._count = 0
@@ -120,14 +146,16 @@ class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
         if self._length is not None and self._count >= self._length:
             raise StopIteration
         samples, _resets = zip(*[self._get_sample(i) for i in range(len(self._datasets))])
-        # update _num_samples_yielded only if samples were successfully fetched from all datasets
+        # update _num_samples_yielded and _num_cycles only if samples were successfully fetched from all datasets
         for i, _reset in enumerate(_resets):
             self._num_samples_yielded[i] = 1 if _reset else self._num_samples_yielded[i] + 1
+            self._num_cycles[i] = self._num_cycles[i] + 1 if _reset else self._num_cycles[i]
         self._count += 1
         if self._use_streaming_dataloader:
             return {
                 __SAMPLES_KEY__: samples,
                 __NUM_SAMPLES_YIELDED_KEY__: self._num_samples_yielded,
+                __NUM_CYCLES_KEY__: self._num_cycles,
             }
         return samples
 

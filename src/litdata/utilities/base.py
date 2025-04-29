@@ -18,6 +18,7 @@ from torch.utils.data import IterableDataset
 
 from litdata.streaming.dataset import StreamingDataset
 
+__NUM_CYCLES_KEY__ = "__NUM_CYCLES__"
 __NUM_SAMPLES_YIELDED_KEY__ = "__NUM_SAMPLES_YIELDED__"
 __SAMPLES_KEY__ = "__SAMPLES__"
 

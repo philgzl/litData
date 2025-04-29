@@ -41,7 +41,7 @@ from litdata.streaming.dataset import StreamingDataset
 from litdata.streaming.parallel import ParallelStreamingDataset
 from litdata.streaming.sampler import CacheBatchSampler
 from litdata.utilities._pytree import tree_flatten
-from litdata.utilities.base import __NUM_SAMPLES_YIELDED_KEY__, __SAMPLES_KEY__
+from litdata.utilities.base import __NUM_CYCLES_KEY__, __NUM_SAMPLES_YIELDED_KEY__, __SAMPLES_KEY__
 from litdata.utilities.env import _DistributedEnv
 
 logger = logging.getLogger("litdata.streaming.dataloader")
@@ -500,10 +500,13 @@ class StreamingDataLoaderCollateFn:
     def __call__(self, items: List[Any]) -> Any:
         if len(items) > 0 and isinstance(items[0], dict) and __NUM_SAMPLES_YIELDED_KEY__ in items[0]:
             batch = self.collate_fn([item[__SAMPLES_KEY__] for item in items])
-            return {
+            output = {
                 __SAMPLES_KEY__: batch,
                 __NUM_SAMPLES_YIELDED_KEY__: list(torch.tensor(items[-1][__NUM_SAMPLES_YIELDED_KEY__]).reshape(-1, 1)),
             }
+            if __NUM_CYCLES_KEY__ in items[0]:
+                output[__NUM_CYCLES_KEY__] = list(torch.tensor(items[-1][__NUM_CYCLES_KEY__]).reshape(-1, 1))
+            return output
 
         return self.collate_fn(items)
 
@@ -580,8 +583,8 @@ class StreamingDataLoader(DataLoader):
     ) -> None:  # pyright: ignore
         if not isinstance(dataset, (StreamingDataset, CombinedStreamingDataset, ParallelStreamingDataset)):
             raise RuntimeError(
-                "The provided dataset should be either an instance of StreamingDataset or CombinedStreamingDataset."
-                f" Found {dataset}."
+                "The provided dataset should be either an instance of StreamingDataset, CombinedStreamingDataset or "
+                f"ParallelStreamingDataset. Found {dataset}."
             )
 
         if shuffle is not None:
@@ -612,6 +615,7 @@ class StreamingDataLoader(DataLoader):
         self._profile_dir = profile_dir
         self._num_samples_yielded_streaming = 0
         self._num_samples_yielded_wrapper: Dict[int, List[Any]] = {}
+        self._num_cycles: Dict[int, List[Any]] = {}
         self.rng_state: Optional[Any] = None
         self._worker_idx = cycle(list(range(self.num_workers if self.num_workers > 0 else 1)))
         self._worker_idx_iter: Optional[Any] = None
@@ -636,6 +640,7 @@ class StreamingDataLoader(DataLoader):
             self._num_samples_yielded_streaming = 0
             if not isinstance(self.dataset, ParallelStreamingDataset) or self.dataset._length is None:
                 self._num_samples_yielded_wrapper = {}
+                self._num_cycles = {}
                 self.dataset.reset_state_dict()
 
         self.dataset.set_epoch(self.current_epoch)
@@ -658,6 +663,12 @@ class StreamingDataLoader(DataLoader):
                         sample[-1].item() if self.batch_size > 1 else sample.item()
                         for sample in batch[__NUM_SAMPLES_YIELDED_KEY__]
                     ]
+
+                    if __NUM_CYCLES_KEY__ in batch:
+                        self._num_cycles[self._latest_worker_idx] = [
+                            cycle[-1].item() if self.batch_size > 1 else cycle.item()
+                            for cycle in batch[__NUM_CYCLES_KEY__]
+                        ]
 
                     yield batch[__SAMPLES_KEY__]
                 else:
@@ -693,18 +704,32 @@ class StreamingDataLoader(DataLoader):
                 "latest_worker_idx": self._latest_worker_idx,
             }
 
-        # initialize a list to track the number of samples yielded for each dataset
-        num_samples_yieled = [0 for _ in range(len(self.dataset._datasets))]
+        extra = {}
 
-        for worker_idx in self._num_samples_yielded_wrapper:
-            for dataset_idx, samples_yieled in enumerate(self._num_samples_yielded_wrapper[worker_idx]):
-                num_samples_yieled[dataset_idx] += samples_yieled
+        if isinstance(self.dataset, CombinedStreamingDataset):
+            # initialize a list to track the number of samples yielded for each dataset
+            num_samples_yieled = [0 for _ in range(len(self.dataset._datasets))]
+
+            for worker_idx in self._num_samples_yielded_wrapper:
+                for dataset_idx, samples_yieled in enumerate(self._num_samples_yielded_wrapper[worker_idx]):
+                    num_samples_yieled[dataset_idx] += samples_yieled
+
+        elif isinstance(self.dataset, ParallelStreamingDataset):
+            num_samples_yieled = self.dataset._get_samples_yielded(self._num_samples_yielded_wrapper, self._num_cycles)
+            extra["num_cycles"] = deepcopy(self._num_cycles)
+
+        else:
+            raise RuntimeError(
+                "The provided dataset should be a `StreamingDataset`, a `CombinedStreamingDataset` or a "
+                "`ParallelStreamingDataset`."
+            )
 
         return {
             "dataset": self.dataset.state_dict(self.num_workers, self.batch_size, num_samples_yieled),
             "current_epoch": self.current_epoch,
             "latest_worker_idx": self._latest_worker_idx,
             "num_samples_yielded": deepcopy(self._num_samples_yielded_wrapper),
+            **extra,
         }
 
     def load_state_dict(self, obj: Dict[str, Any]) -> None:
@@ -722,6 +747,9 @@ class StreamingDataLoader(DataLoader):
             self._num_samples_yielded_streaming = obj["num_samples_yielded"]
         else:
             self._num_samples_yielded_wrapper = obj["num_samples_yielded"]
+
+        if isinstance(self.dataset, ParallelStreamingDataset):
+            self._num_cycles = obj["num_cycles"]
 
         # Used to restart on the next DataLoader worker from the previous run.
         self._latest_worker_idx = obj["latest_worker_idx"] + 1
@@ -756,12 +784,11 @@ class StreamingDataLoader(DataLoader):
         elif isinstance(self.dataset, ParallelStreamingDataset):
             self.dataset._set_use_streaming_dataloader(True)
             self.dataset.load_state_dict(obj)
-            # sum samples across workers for each dataset
-            samples_yielded_per_dset = [sum(samples) for samples in zip(*self._num_samples_yielded_wrapper.values())]
-            if any(samples > 0 for samples in samples_yielded_per_dset) and (
+            num_samples_yieled = self.dataset._get_samples_yielded(self._num_samples_yielded_wrapper, self._num_cycles)
+            if any(samples > 0 for samples in num_samples_yieled) and (
                 isinstance(self.dataset._length, (int, float))  # can be float("inf")
                 or self.dataset._length is None
-                and any(samples < len(self.dataset) for samples in samples_yielded_per_dset)
+                and any(samples < len(self.dataset) for samples in num_samples_yieled)
             ):
                 self.restore = True
 
@@ -772,7 +799,10 @@ class StreamingDataLoader(DataLoader):
             if self._num_samples_yielded_streaming > 0 and self._num_samples_yielded_streaming < len(self.dataset):
                 self.restore = True
         else:
-            raise RuntimeError("The provided dataset should be a `StreamingDataset` or a `CombinedStreamingDataset`.")
+            raise RuntimeError(
+                "The provided dataset should be a `StreamingDataset`, a `CombinedStreamingDataset` or a "
+                "`ParallelStreamingDataset`."
+            )
 
     def _get_iterator(self) -> "_BaseDataLoaderIter":
         """Overridden to ensure the `Cache.done()` method is triggered on iteration done."""

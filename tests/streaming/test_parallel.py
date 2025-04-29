@@ -193,7 +193,7 @@ class DummyIterableDataset(IterableDataset):
 
 
 @pytest.mark.parametrize(
-    ("batch_size", "length", "expected", "num_samples_yielded"),
+    ("batch_size", "length", "expected", "num_samples_yielded", "num_cycles"),
     [
         (
             1,
@@ -208,6 +208,7 @@ class DummyIterableDataset(IterableDataset):
                 [torch.Tensor([6]), torch.Tensor([-6])],
             ],
             [7, 7],
+            [0, 0],
         ),
         (
             2,
@@ -219,6 +220,7 @@ class DummyIterableDataset(IterableDataset):
                 [torch.Tensor([6]), torch.Tensor([-6])],
             ],
             [7, 7],
+            [0, 0],
         ),
         (
             1,
@@ -239,6 +241,7 @@ class DummyIterableDataset(IterableDataset):
                 [torch.Tensor([2]), torch.Tensor([-5])],
             ],
             [3, 6],
+            [1, 1],
         ),
         (
             2,
@@ -253,10 +256,11 @@ class DummyIterableDataset(IterableDataset):
                 [torch.Tensor([2]), torch.Tensor([-5])],
             ],
             [3, 6],
+            [1, 1],
         ),
     ],
 )
-def test_parallel_dataset_with_dataloader_and_one_worker(batch_size, length, expected, num_samples_yielded):
+def test_parallel_dataset_with_dataloader_and_one_worker(batch_size, length, expected, num_samples_yielded, num_cycles):
     dset_1 = DummyIterableDataset(10, 1)
     dset_2 = DummyIterableDataset(-7, -1)
     dset = TestParallelStreamingDataset([dset_1, dset_2], length=length)
@@ -275,8 +279,9 @@ def test_parallel_dataset_with_dataloader_and_one_worker(batch_size, length, exp
             "1": {"num_samples_yielded": num_samples_yielded[1], "num_workers": 1, "batch_size": batch_size},
         },
         "current_epoch": 1,
-        "latest_worker_idx": 0,
+        "latest_worker_idx": 0 if length is None else 1,
         "num_samples_yielded": {0: num_samples_yielded},
+        "num_cycles": {0: num_cycles},
     }
 
 
@@ -431,6 +436,7 @@ def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
         "current_epoch": 1,
         "latest_worker_idx": 0,
         "num_samples_yielded": {},
+        "num_cycles": {},
     }
     expected_num_samples_yielded = [
         {0: [2, 2]},
@@ -439,6 +445,14 @@ def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
         {0: [4, 4], 1: [2, 2], 2: [2, 2]},
         {0: [4, 4], 1: [4, 4], 2: [2, 2]},
         {0: [4, 4], 1: [4, 4], 2: [4, 4]},
+    ]
+    expected_num_cycles = [
+        {0: [0, 0]},
+        {0: [0, 0], 1: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
     ]
     expected_current_epoch = [1, 1, 1, 1, 1, 1]
     dataset_1_current_epoch = [1, 1, 1, 1, 1, 1]
@@ -454,6 +468,7 @@ def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
         curr_state_dict = dataloader.state_dict()
 
         expected_dataset_state["num_samples_yielded"] = expected_num_samples_yielded[idx]
+        expected_dataset_state["num_cycles"] = expected_num_cycles[idx]
         expected_dataset_state["current_epoch"] = expected_current_epoch[idx]
         expected_dataset_state["latest_worker_idx"] = expected_latest_worker_idx[idx]
         expected_dataset_state["dataset"]["0"]["num_samples_yielded"] = expected_dataset0_samples_yielded[idx]
@@ -478,6 +493,14 @@ def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
         {0: [4, 4], 1: [4, 4], 2: [2, 2]},
         {0: [4, 4], 1: [4, 4], 2: [4, 4]},
     ]
+    expected_num_cycles = [
+        {0: [0, 0]},
+        {0: [0, 0], 1: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+    ]
     expected_current_epoch = [2, 2, 2, 2, 2, 2]
     dataset_1_current_epoch = [2, 2, 2, 2, 2, 2]
     dataset_2_current_epoch = [2, 2, 2, 2, 2, 2]
@@ -489,6 +512,7 @@ def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
         curr_state_dict = dataloader.state_dict()
 
         expected_dataset_state["num_samples_yielded"] = expected_num_samples_yielded[idx]
+        expected_dataset_state["num_cycles"] = expected_num_cycles[idx]
         expected_dataset_state["current_epoch"] = expected_current_epoch[idx]
         expected_dataset_state["latest_worker_idx"] = expected_latest_worker_idx[idx]
         expected_dataset_state["dataset"]["0"]["num_samples_yielded"] = expected_dataset0_samples_yielded[idx]
@@ -599,6 +623,7 @@ def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmpdir):
         "current_epoch": 1,
         "latest_worker_idx": 0,
         "num_samples_yielded": {},
+        "num_cycles": {},
     }
     expected_num_samples_yielded = [
         {0: [2, 2]},
@@ -607,6 +632,14 @@ def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmpdir):
         {0: [4, 4], 1: [2, 2], 2: [2, 2]},
         {0: [4, 4], 1: [4, 4], 2: [2, 2]},
         {0: [4, 4], 1: [4, 4], 2: [4, 4]},
+    ]
+    expected_num_cycles = [
+        {0: [0, 0]},
+        {0: [0, 0], 1: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
     ]
     expected_current_epoch = [1, 1, 1, 1, 1, 1]
     dataset_1_current_epoch = [1, 1, 1, 1, 1, 1]
@@ -622,6 +655,7 @@ def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmpdir):
         curr_state_dict = dataloader.state_dict()
 
         expected_dataset_state["num_samples_yielded"] = expected_num_samples_yielded[idx]
+        expected_dataset_state["num_cycles"] = expected_num_cycles[idx]
         expected_dataset_state["current_epoch"] = expected_current_epoch[idx]
         expected_dataset_state["latest_worker_idx"] = expected_latest_worker_idx[idx]
         expected_dataset_state["dataset"]["0"]["num_samples_yielded"] = expected_dataset0_samples_yielded[idx]
@@ -646,6 +680,14 @@ def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmpdir):
         {0: [2, 8], 1: [2, 2], 2: [6, 6]},
         {0: [2, 8], 1: [2, 2], 2: [2, 2]},
     ]
+    expected_num_cycles = [
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [1, 0], 1: [0, 0], 2: [0, 0]},
+        {0: [1, 0], 1: [1, 1], 2: [0, 0]},
+        {0: [1, 0], 1: [1, 1], 2: [1, 1]},
+    ]
     expected_current_epoch = [2, 2, 2, 2, 2, 2]
     dataset_1_current_epoch = [1, 1, 1, 2, 2, 2]
     dataset_2_current_epoch = [1, 1, 1, 1, 2, 2]
@@ -657,6 +699,7 @@ def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmpdir):
         curr_state_dict = dataloader.state_dict()
 
         expected_dataset_state["num_samples_yielded"] = expected_num_samples_yielded[idx]
+        expected_dataset_state["num_cycles"] = expected_num_cycles[idx]
         expected_dataset_state["current_epoch"] = expected_current_epoch[idx]
         expected_dataset_state["latest_worker_idx"] = expected_latest_worker_idx[idx]
         expected_dataset_state["dataset"]["0"]["num_samples_yielded"] = expected_dataset0_samples_yielded[idx]
