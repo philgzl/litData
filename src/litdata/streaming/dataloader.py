@@ -733,6 +733,7 @@ class StreamingDataLoader(DataLoader):
                 "`ParallelStreamingDataset`."
             )
 
+        assert self.batch_size
         return {
             "dataset": self.dataset.state_dict(self.num_workers, self.batch_size, num_samples_yieled),
             "current_epoch": self.current_epoch,
@@ -798,8 +799,10 @@ class StreamingDataLoader(DataLoader):
             num_samples_yieled, num_cycles = self.dataset._get_num_samples_yielded(
                 self._num_samples_yielded_wrapper, self._num_cycles
             )
-            if self.dataset._length is None and any(0 < samples < len(self.dataset) for samples in num_samples_yieled):
-                self.restore = True
+            if self.dataset._length is None:
+                dset_len = self.dataset._len()
+                if dset_len is not None and any(0 < samples < dset_len for samples in num_samples_yieled):
+                    self.restore = True
             if self.dataset._length == float("inf") and any(samples > 0 for samples in num_samples_yieled):
                 self.restore = True
             if isinstance(self.dataset._length, int):

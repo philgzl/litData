@@ -124,6 +124,10 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         return self._iterator
 
     def __len__(self) -> Optional[int]:
+        return self._len()
+
+    def _len(self) -> Optional[int]:
+        # used internally instead of __len__ to prevent mypy error related to __len__ being able to return None
         return self.get_len(self.num_workers, self.batch_size if self.batch_size else 1)
 
     def _get_num_samples_yielded(
