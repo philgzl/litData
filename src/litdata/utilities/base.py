@@ -28,7 +28,7 @@ class _BaseStreamingDatasetWrapper(IterableDataset, ABC):
     # This includes CombinedStreamingDataset and ParallelStreamingDataset
 
     _datasets: List[StreamingDataset]
-    _iterator: "Optional[_BaseDatasetWrapperIterator[Any]]"
+    _iterator: "Optional[_BaseDatasetWrapperIterator]"
     _current_epoch: int
     batch_size: int
     num_workers: int

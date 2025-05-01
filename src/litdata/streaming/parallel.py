@@ -12,7 +12,7 @@
 # limitations under the License.
 
 import logging
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from litdata.streaming.dataset import StreamingDataset
 from litdata.utilities.base import (
@@ -42,7 +42,7 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
     def __init__(
         self,
         datasets: List[StreamingDataset],
-        length: Optional[int | float] = None,
+        length: Optional[Union[int, float]] = None,
         force_override_state_dict: bool = False,
     ) -> None:
         """Enable to stream data from multiple StreamingDataset in parallel.
@@ -109,8 +109,8 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
 
         # convert the length option to the corresponding number of samples for the current worker
         length = self._length
-        if length not in [None, float("inf")]:
-            length = self._length // worker_env.world_size + (worker_env.rank < self._length % worker_env.world_size)
+        if length is not None and length != float("inf"):
+            length = length // worker_env.world_size + (worker_env.rank < length % worker_env.world_size)
 
         # convert the true length of each dataset i.e. the cycle length to the corresponding value for current worker
         dset_lengths = [
@@ -123,7 +123,7 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         )
         return self._iterator
 
-    def __len__(self) -> int:
+    def __len__(self) -> Optional[int]:
         return self.get_len(self.num_workers, self.batch_size if self.batch_size else 1)
 
     def _get_num_samples_yielded(
@@ -155,7 +155,7 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
             output[i] = sum(s for (s, c) in zip(num_samples_yielded, num_cycles) if c == cycles[i])
         return output, cycles
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         super().load_state_dict(state_dict)
         if self._use_streaming_dataloader:
             self._num_cycles = state_dict["num_cycles"]
@@ -168,7 +168,7 @@ class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
         use_streaming_dataloader: bool,
         num_samples_yielded: Any,
         num_cycles: Any,
-        length: Optional[int | float],
+        length: Optional[Union[int, float]],
         dset_lengths: List[int],
     ) -> None:
         self._datasets = datasets
@@ -188,7 +188,7 @@ class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
                 for i in range(1, len(dset_lengths))
             )
 
-    def __next__(self) -> Tuple[Any]:
+    def __next__(self) -> Union[Tuple[Any], Dict[str, Any]]:
         if self._length is not None and self._count >= self._length:
             raise StopIteration
         samples, _resets = zip(*[self._get_sample(i) for i in range(len(self._datasets))])
