@@ -71,6 +71,19 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         self.num_workers = 1
         self.batch_size = 1
 
+        if length is not None:
+            for dataset in self._datasets:
+                if isinstance(dataset, StreamingDataset):
+                    dataset.set_epoch(1)
+
+    def set_epoch(self, current_epoch: int) -> None:
+        self._current_epoch = current_epoch
+        if self._length is not None:
+            # do not set the epoch as cycling datasets have their own epoch counter
+            return
+        for dataset in self._datasets:
+            dataset.set_epoch(current_epoch)
+
     def get_len(self, num_workers: int, batch_size: int) -> Optional[int]:
         self.num_workers = num_workers
         self.batch_size = batch_size
@@ -98,26 +111,32 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         if length not in [None, float("inf")]:
             length = self._length // worker_env.world_size + (worker_env.rank < self._length % worker_env.world_size)
 
+        dset_lengths = [
+            self._get_len(d) // worker_env.world_size + (worker_env.rank < self._get_len(d) % worker_env.world_size)
+            for d in self._datasets
+        ]
+
         self._iterator = _ParallelDatasetIterator(
-            self._datasets, self._use_streaming_dataloader, num_samples_yielded, num_cycles, length
+            self._datasets, self._use_streaming_dataloader, num_samples_yielded, num_cycles, length, dset_lengths
         )
         return self._iterator
 
     def __len__(self) -> int:
         return self.get_len(self.num_workers, self.batch_size if self.batch_size else 1)
 
-    def _get_samples_yielded(
+    def _get_num_samples_yielded(
         self, num_samples_yielded: Dict[int, List[int]], num_cycles: Dict[int, List[int]]
-    ) -> List[int]:
+    ) -> Tuple[List[int], List[int]]:
         assert num_samples_yielded.keys() == num_cycles.keys()
         assert all(len(s) == len(c) for s, c in zip(num_samples_yielded.values(), num_cycles.values()))
         output = [0 for _ in range(len(self._datasets))]
+        cycles = [0 for _ in range(len(self._datasets))]
         for i, (num_samples_yielded, num_cycles) in enumerate(
             zip(zip(*num_samples_yielded.values()), zip(*num_cycles.values()))
         ):
-            max_num_cycles = max(num_cycles)
-            output[i] = sum(s for (s, c) in zip(num_samples_yielded, num_cycles) if c == max_num_cycles)
-        return output
+            cycles[i] = max(num_cycles)
+            output[i] = sum(s for (s, c) in zip(num_samples_yielded, num_cycles) if c == cycles[i])
+        return output, cycles
 
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
@@ -132,7 +151,8 @@ class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
         use_streaming_dataloader: bool,
         num_samples_yielded: Any,
         num_cycles: Any,
-        length: Optional[int | float] = None,
+        length: Optional[int | float],
+        dset_lengths: List[int],
     ) -> None:
         self._datasets = datasets
         self._dataset_iters = [iter(dataset) for dataset in datasets]
@@ -140,7 +160,14 @@ class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
         self._num_cycles = num_cycles or [0 for _ in range(len(datasets))]
         self._length = length
         self._use_streaming_dataloader = use_streaming_dataloader
-        self._count = 0
+        if self._length in [None, float("inf"), 0]:
+            self._count = 0
+        else:
+            self._count = (dset_lengths[0] * self._num_cycles[0] + self._num_samples_yielded[0]) % self._length
+            assert all(
+                (dset_lengths[i] * self._num_cycles[i] + self._num_samples_yielded[i]) % self._length == self._count
+                for i in range(1, len(dset_lengths))
+            )
 
     def __next__(self) -> Tuple[Any]:
         if self._length is not None and self._count >= self._length:

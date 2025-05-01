@@ -633,15 +633,19 @@ class StreamingDataLoader(DataLoader):
 
     def __iter__(self) -> Any:
         if not self.restore:
-            self._latest_worker_idx = 0
-            self._worker_idx = cycle(list(range(self.num_workers if self.num_workers > 0 else 1)))
-            self._worker_idx_iter = iter(self._worker_idx)
-            self.current_epoch += 1
-            self._num_samples_yielded_streaming = 0
-            if not isinstance(self.dataset, ParallelStreamingDataset) or self.dataset._length is None:
+            if (
+                not isinstance(self.dataset, ParallelStreamingDataset)
+                or self.dataset._length is None
+                or self.current_epoch == 0
+            ):
+                self._latest_worker_idx = 0
+                self._worker_idx = cycle(list(range(self.num_workers if self.num_workers > 0 else 1)))
+                self._worker_idx_iter = iter(self._worker_idx)
+                self._num_samples_yielded_streaming = 0
                 self._num_samples_yielded_wrapper = {}
                 self._num_cycles = {}
                 self.dataset.reset_state_dict()
+            self.current_epoch += 1
 
         self.dataset.set_epoch(self.current_epoch)
         logger.debug(_get_log_msg({"name": "iterating_dataloader", "ph": "B"}))
@@ -669,6 +673,10 @@ class StreamingDataLoader(DataLoader):
                             cycle[-1].item() if self.batch_size > 1 else cycle.item()
                             for cycle in batch[__NUM_CYCLES_KEY__]
                         ]
+                        if self.dataset._length is not None:
+                            for i_cycle, dset in zip(self._num_cycles[self._latest_worker_idx], self.dataset._datasets):
+                                if dset.current_epoch != i_cycle + 1:
+                                    dset.current_epoch = i_cycle + 1
 
                     yield batch[__SAMPLES_KEY__]
                 else:
@@ -715,7 +723,9 @@ class StreamingDataLoader(DataLoader):
                     num_samples_yieled[dataset_idx] += samples_yieled
 
         elif isinstance(self.dataset, ParallelStreamingDataset):
-            num_samples_yieled = self.dataset._get_samples_yielded(self._num_samples_yielded_wrapper, self._num_cycles)
+            num_samples_yieled, _ = self.dataset._get_num_samples_yielded(
+                self._num_samples_yielded_wrapper, self._num_cycles
+            )
             extra["num_cycles"] = deepcopy(self._num_cycles)
 
         else:
@@ -784,13 +794,19 @@ class StreamingDataLoader(DataLoader):
         elif isinstance(self.dataset, ParallelStreamingDataset):
             self.dataset._set_use_streaming_dataloader(True)
             self.dataset.load_state_dict(obj)
-            num_samples_yieled = self.dataset._get_samples_yielded(self._num_samples_yielded_wrapper, self._num_cycles)
-            if any(samples > 0 for samples in num_samples_yieled) and (
-                isinstance(self.dataset._length, (int, float))  # can be float("inf")
-                or self.dataset._length is None
-                and any(samples < len(self.dataset) for samples in num_samples_yieled)
-            ):
+            num_samples_yieled, num_cycles = self.dataset._get_num_samples_yielded(
+                self._num_samples_yielded_wrapper, self._num_cycles
+            )
+            if self.dataset._length is None and any(0 < samples < len(self.dataset) for samples in num_samples_yieled):
                 self.restore = True
+            if self.dataset._length == float("inf") and any(samples > 0 for samples in num_samples_yieled):
+                self.restore = True
+            if isinstance(self.dataset._length, int):
+                dset_lens = [self.dataset._get_len(d) for d in self.dataset._datasets]
+                for samples, cycles, length in zip(num_samples_yieled, num_cycles, dset_lens):
+                    if 0 < (cycles * length + samples) % self.dataset._length < self.dataset._length:
+                        self.restore = True
+                        break
 
         elif isinstance(self.dataset, StreamingDataset):
             self.dataset.load_state_dict(obj["dataset"])

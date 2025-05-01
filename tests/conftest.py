@@ -62,10 +62,10 @@ def combined_dataset(tmpdir_factory):
 
 
 @pytest.fixture
-def parallel_dataset(tmpdir_factory):
+def parallel_dataset(tmpdir_factory, request):
     tmpdir = tmpdir_factory.mktemp("data")
     datasets = [str(tmpdir.join(f"dataset_{i}")) for i in range(2)]
-    for dataset, num_items in zip(datasets, [100, 120]):
+    for dataset, num_items in zip(datasets, [96, 128]):
         cache = Cache(input_dir=dataset, chunk_size=10)
         for i in range(num_items):
             cache[i] = i
@@ -73,7 +73,7 @@ def parallel_dataset(tmpdir_factory):
         cache.merge()
     dataset_1 = StreamingDataset(datasets[0], shuffle=True)
     dataset_2 = StreamingDataset(datasets[1], shuffle=True)
-    return ParallelStreamingDataset(datasets=[dataset_1, dataset_2])
+    return ParallelStreamingDataset(datasets=[dataset_1, dataset_2], length=request.param), request.param
 
 
 @pytest.fixture

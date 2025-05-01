@@ -165,9 +165,13 @@ class DummyIterableDataset(IterableDataset):
         super().__init__()
         self.end = end
         self.step = step
+        self.current_epoch = 0
 
     def __iter__(self):
         return iter(range(0, self.end, self.step))
+
+    def __len__(self):
+        return len(range(0, self.end, self.step))
 
     def state_dict(self, **kwargs):
         return kwargs
@@ -177,7 +181,7 @@ class DummyIterableDataset(IterableDataset):
             self._state_dict = state_dict
 
     def set_epoch(self, current_epoch):
-        pass
+        self.current_epoch = current_epoch
 
     def set_shuffle(self, _):
         pass
@@ -285,7 +289,9 @@ def test_parallel_dataset_with_dataloader_and_one_worker(batch_size, length, exp
     }
 
 
+@pytest.mark.parametrize("parallel_dataset", [None, 3, float("inf")], indirect=True)
 def test_parallel_dataset_dataloader_states_without_any_iterations(parallel_dataset):
+    parallel_dataset, _ = parallel_dataset
     dataloader = StreamingDataLoader(parallel_dataset, batch_size=4)
     assert not dataloader.restore
     dataloader.load_state_dict(dataloader.state_dict())
@@ -294,39 +300,78 @@ def test_parallel_dataset_dataloader_states_without_any_iterations(parallel_data
 
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("num_workers", [0, 2, 4])
+@pytest.mark.parametrize("parallel_dataset", [None, 48], indirect=True)
 def test_parallel_dataset_dataloader_states_complete_iterations(parallel_dataset, num_workers):
     print(f"Testing with num_workers={num_workers}")
-    dataloader = StreamingDataLoader(parallel_dataset, batch_size=4, num_workers=num_workers)
-    assert len(dataloader) == 25, "Dataloader length should be 25 (ceil(min(100 items, 120 items) / batch size 4))"
+
+    parallel_dataset, length = parallel_dataset
+    batch_size = 2
+
+    dataloader = StreamingDataLoader(parallel_dataset, batch_size=batch_size, num_workers=num_workers)
+
+    assert len(dataloader) == -(-len(parallel_dataset) // batch_size)
 
     # Verify dataloader state after complete last iteration
-    for _ in dataloader:
+    epoch_1_data = []
+    for data in dataloader:
         assert dataloader.current_epoch == 1, "Current epoch should be 1"
-        pass
+        epoch_1_data.append(data)
 
     dataloader.load_state_dict(dataloader.state_dict())
     assert not dataloader.restore
 
-    for _ in dataloader:
+    epoch_1_data = [set(torch.cat(x).tolist()) for x in zip(*epoch_1_data)]
+    assert all(len(x) == len(parallel_dataset) for x in epoch_1_data)
+
+    epoch_2_data = []
+    for data in dataloader:
         assert dataloader.current_epoch == 2, "Current epoch should be 2"
-        pass
+        epoch_2_data.append(data)
 
     assert not dataloader.restore
 
-    del dataloader
+    epoch_2_data = [set(torch.cat(x).tolist()) for x in zip(*epoch_2_data)]
+    assert all(len(x) == len(parallel_dataset) for x in epoch_2_data)
+
+    if length is not None:
+        # dataset length option is 48 and number of items on disk is 96 so the epochs should not overlap
+        assert all(not x & y for x, y in zip(epoch_1_data, epoch_2_data)), "Epoch 1 and 2 data should not overlap"
+
+    epoch_3_data = []
+    for data in dataloader:
+        assert dataloader.current_epoch == 3, "Current epoch should be 3"
+        epoch_3_data.append(data)
+
+    epoch_3_data = [set(torch.cat(x).tolist()) for x in zip(*epoch_3_data)]
+    if length is None:
+        assert all(len(x) == len(parallel_dataset) for x in epoch_3_data)
+    else:
+        # the datasets have cycled and shuffled so check new data overlaps with the previous epochs
+        assert len(epoch_1_data[0] & epoch_3_data[0]) > 0
+        assert len(epoch_2_data[0] & epoch_3_data[0]) > 0
+        assert len(epoch_1_data[1] & epoch_3_data[1]) > 0
+        assert len(epoch_2_data[1] & epoch_3_data[1]) > 0
+        # dataset 1 length on disk is 96 so epoch 3 should have no dupes
+        assert len(epoch_3_data[0]) == len(parallel_dataset)
+        # dataset 2 length on disk is 128 so epoch 3 can have dupes since we cycled within epoch 3
+        assert len(epoch_3_data[1]) <= len(parallel_dataset)
 
 
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("num_workers", [0, 2, 4])
 @pytest.mark.parametrize("break_at", [7, 10])
+@pytest.mark.parametrize("parallel_dataset", [None, 40, 96], indirect=True)
 def test_parallel_dataset_dataloader_states_partial_iterations(parallel_dataset, num_workers, break_at):
     print(f"Testing with num_workers={num_workers}, break_at={break_at}")
 
+    parallel_dataset, _ = parallel_dataset
+    batch_size = 2
+
     # Verify dataloader state after partial last iteration
-    dataloader = StreamingDataLoader(parallel_dataset, batch_size=4, num_workers=num_workers)
+    dataloader = StreamingDataLoader(parallel_dataset, batch_size=batch_size, num_workers=num_workers)
 
     total_batches = len(dataloader)
-    assert total_batches == 25, "Dataloader length should be 25 (ceil(min(100 items, 120 items) / batch size 4))"
+    assert total_batches == -(-len(parallel_dataset) // batch_size)
 
     assert not dataloader.restore, "Dataloader should not be in restore state initially."
 
@@ -348,9 +393,7 @@ def test_parallel_dataset_dataloader_states_partial_iterations(parallel_dataset,
         assert dataloader.current_epoch == 1, "Current epoch should be 1 during restore"
         count += 1
     expected_batches = total_batches - break_at - 1
-    assert count >= expected_batches, (
-        f"There should be at least{expected_batches} remaining batches in the first epoch."
-    )
+    assert count == expected_batches, f"There should be {expected_batches} remaining batches in the first epoch."
     assert not dataloader.restore, "Dataloader should not be in restore state after completing first epoch."
 
     # Verify batches in the second epoch

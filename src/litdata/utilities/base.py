@@ -36,15 +36,6 @@ class _BaseStreamingDatasetWrapper(IterableDataset, ABC):
     _use_streaming_dataloader: bool
     _num_samples_yielded: Optional[List[int]]
 
-    def set_epoch(self, current_epoch: int) -> None:
-        """Set the current epoch to the datasets on epoch starts.
-
-        When using the StreamingDataLoader, this is done automatically.
-        """
-        self._current_epoch = current_epoch
-        for dataset in self._datasets:
-            dataset.set_epoch(current_epoch)
-
     def set_shuffle(self, shuffle: bool) -> None:
         """Set the current shuffle to the datasets."""
         for dataset in self._datasets:
@@ -118,6 +109,9 @@ class _BaseStreamingDatasetWrapper(IterableDataset, ABC):
         if isinstance(d, StreamingDataset):
             return d.get_len(self.num_workers, self.batch_size)
         return len(d)
+
+    @abstractmethod
+    def set_epoch(self, current_epoch: int) -> None: ...
 
     @abstractmethod
     def get_len(self, num_workers: int, batch_size: int) -> Optional[int]: ...
