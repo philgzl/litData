@@ -500,13 +500,15 @@ class StreamingDataLoaderCollateFn:
     def __call__(self, items: List[Any]) -> Any:
         if len(items) > 0 and isinstance(items[0], dict) and __NUM_SAMPLES_YIELDED_KEY__ in items[0]:
             batch = self.collate_fn([item[__SAMPLES_KEY__] for item in items])
-            output = {
+            return {
                 __SAMPLES_KEY__: batch,
                 __NUM_SAMPLES_YIELDED_KEY__: list(torch.tensor(items[-1][__NUM_SAMPLES_YIELDED_KEY__]).reshape(-1, 1)),
+                **(
+                    {__NUM_CYCLES_KEY__: list(torch.tensor(items[-1][__NUM_CYCLES_KEY__]).reshape(-1, 1))}
+                    if __NUM_CYCLES_KEY__ in items[0]
+                    else {}
+                ),
             }
-            if __NUM_CYCLES_KEY__ in items[0]:
-                output[__NUM_CYCLES_KEY__] = list(torch.tensor(items[-1][__NUM_CYCLES_KEY__]).reshape(-1, 1))
-            return output
 
         return self.collate_fn(items)
 
@@ -641,8 +643,8 @@ class StreamingDataLoader(DataLoader):
                 self._latest_worker_idx = 0
                 self._worker_idx = cycle(list(range(self.num_workers if self.num_workers > 0 else 1)))
                 self._worker_idx_iter = iter(self._worker_idx)
-                self._num_samples_yielded_streaming = 0
                 self._num_samples_yielded_wrapper = {}
+                self._num_samples_yielded_streaming = 0
                 self._num_cycles = {}
                 self.dataset.reset_state_dict()
             self.current_epoch += 1
@@ -712,8 +714,6 @@ class StreamingDataLoader(DataLoader):
                 "latest_worker_idx": self._latest_worker_idx,
             }
 
-        extra = {}
-
         if isinstance(self.dataset, CombinedStreamingDataset):
             # initialize a list to track the number of samples yielded for each dataset
             num_samples_yieled = [0 for _ in range(len(self.dataset._datasets))]
@@ -726,7 +726,6 @@ class StreamingDataLoader(DataLoader):
             num_samples_yieled, _ = self.dataset._get_num_samples_yielded(
                 self._num_samples_yielded_wrapper, self._num_cycles
             )
-            extra["num_cycles"] = deepcopy(self._num_cycles)
 
         else:
             raise RuntimeError(
@@ -739,7 +738,9 @@ class StreamingDataLoader(DataLoader):
             "current_epoch": self.current_epoch,
             "latest_worker_idx": self._latest_worker_idx,
             "num_samples_yielded": deepcopy(self._num_samples_yielded_wrapper),
-            **extra,
+            **(
+                {"num_cycles": deepcopy(self._num_cycles)} if isinstance(self.dataset, ParallelStreamingDataset) else {}
+            ),
         }
 
     def load_state_dict(self, obj: Dict[str, Any]) -> None:
@@ -804,6 +805,8 @@ class StreamingDataLoader(DataLoader):
             if isinstance(self.dataset._length, int):
                 dset_lens = [self.dataset._get_len(d) for d in self.dataset._datasets]
                 for samples, cycles, length in zip(num_samples_yieled, num_cycles, dset_lens):
+                    # infer where we are at in the current epoch based on the number of times we cycled, the dataset
+                    # length i.e. cycle length, the number of samples yielded in the current cycle, and the epoch length
                     if 0 < (cycles * length + samples) % self.dataset._length < self.dataset._length:
                         self.restore = True
                         break

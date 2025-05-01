@@ -50,7 +50,7 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         Args:
             datasets: The list of the StreamingDataset to use.
             length: The number of samples to yield. If ``None``, the datasets are iterated over until one of them is
-                exhausted. If an integer, the datasets are cycled until ``length`` samples are yielded. Can be a
+                exhausted. If an integer, the datasets are cycled until ``length`` samples are yielded. Can be
                 ``float("inf")`` for an infinite dataset.
             force_override_state_dict: Boolean flag for allowing local arguments to override a loaded state dict.
 
@@ -107,10 +107,12 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         if self._num_cycles is not None and worker_env.rank in self._num_cycles:
             num_cycles = self._num_cycles.get(worker_env.rank, 0)
 
+        # convert the length option to the corresponding number of samples for the current worker
         length = self._length
         if length not in [None, float("inf")]:
             length = self._length // worker_env.world_size + (worker_env.rank < self._length % worker_env.world_size)
 
+        # convert the true length of each dataset i.e. the cycle length to the corresponding value for current worker
         dset_lengths = [
             self._get_len(d) // worker_env.world_size + (worker_env.rank < self._get_len(d) % worker_env.world_size)
             for d in self._datasets
@@ -127,6 +129,21 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
     def _get_num_samples_yielded(
         self, num_samples_yielded: Dict[int, List[int]], num_cycles: Dict[int, List[int]]
     ) -> Tuple[List[int], List[int]]:
+        """Get the number of samples yielded and the number of cycles for each dataset across workers.
+
+        Get the total number of samples yielded by each dataset across workers since it was last cycled, and the number
+        of times each dataset was cycled.
+
+        Args:
+            num_samples_yielded: The number of samples yielded by each dataset and each worker. Keys are the worker
+                ranks and values are the number of samples yielded by each dataset.
+            num_cycles: The number of times each dataset was cycled in each worker. Keys are the worker ranks and values
+                are the number of times each dataset was cycled.
+
+        Returns:
+            A tuple of two lists: the total number of samples yielded by each dataset across workers, and the number of
+            times each dataset was cycled.
+        """
         assert num_samples_yielded.keys() == num_cycles.keys()
         assert all(len(s) == len(c) for s, c in zip(num_samples_yielded.values(), num_cycles.values()))
         output = [0 for _ in range(len(self._datasets))]
@@ -163,6 +180,8 @@ class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
         if self._length in [None, float("inf"), 0]:
             self._count = 0
         else:
+            # infer counter resume value from the number of times we cycled, the number of samples yielded in the
+            # current cycle, the dataset length i.e. cycle length, and the length option
             self._count = (dset_lengths[0] * self._num_cycles[0] + self._num_samples_yielded[0]) % self._length
             assert all(
                 (dset_lengths[i] * self._num_cycles[i] + self._num_samples_yielded[i]) % self._length == self._count

@@ -106,15 +106,6 @@ class CombinedStreamingDataset(_BaseStreamingDatasetWrapper):
         self.batch_size = 1
         self._batching_method: BatchingMethodType = batching_method
 
-    def set_epoch(self, current_epoch: int) -> None:
-        """Set the current epoch to the datasets on epoch starts.
-
-        When using the StreamingDataLoader, this is done automatically.
-        """
-        self._current_epoch = current_epoch
-        for dataset in self._datasets:
-            dataset.set_epoch(current_epoch)
-
     def get_len(self, num_workers: int, batch_size: int) -> Optional[int]:
         self.num_workers = num_workers
         self.batch_size = batch_size
@@ -128,6 +119,16 @@ class CombinedStreamingDataset(_BaseStreamingDatasetWrapper):
     # total length of the datasets
     def _get_total_length(self) -> int:
         return sum(self._get_len(d) for d in self._datasets)
+
+    def set_epoch(self, current_epoch: int) -> None:
+        """Set the current epoch to the datasets on epoch starts.
+
+        When using the StreamingDataLoader, this is done automatically
+
+        """
+        self._current_epoch = current_epoch
+        for dataset in self._datasets:
+            dataset.set_epoch(current_epoch)
 
     def __iter__(self) -> Iterator[Any]:
         assert self._weights
