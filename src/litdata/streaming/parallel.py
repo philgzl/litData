@@ -132,8 +132,8 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
 
     def _get_num_samples_yielded(
         self,
-        num_samples_yielded: Optional[Dict[str, List[int]]] = None,
-        num_cycles: Optional[Dict[str, List[int]]] = None,
+        num_samples_yielded: Optional[Dict[int, List[int]]] = None,
+        num_cycles: Optional[Dict[int, List[int]]] = None,
     ) -> Tuple[List[int], List[int]]:
         """Get the number of samples yielded and the number of cycles for each dataset across workers.
 

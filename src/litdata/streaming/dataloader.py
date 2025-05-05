@@ -616,8 +616,8 @@ class StreamingDataLoader(DataLoader):
         self._profile_skip_batches = profile_skip_batches
         self._profile_dir = profile_dir
         self._num_samples_yielded_streaming = 0
-        self._num_samples_yielded_wrapper: Dict[int, List[Any]] = {}
-        self._num_cycles: Dict[int, List[Any]] = {}
+        self._num_samples_yielded_wrapper: Dict[int, List[int]] = {}
+        self._num_cycles: Dict[int, List[int]] = {}
         self.rng_state: Optional[Any] = None
         self._worker_idx = cycle(list(range(self.num_workers if self.num_workers > 0 else 1)))
         self._worker_idx_iter: Optional[Any] = None
