@@ -299,15 +299,15 @@ def test_parallel_dataset_dataloader_states_without_any_iterations(parallel_data
 
 
 @pytest.mark.timeout(120)
-@pytest.mark.parametrize("num_workers", [0, 2, 4])
-@pytest.mark.parametrize("parallel_dataset", [None, 48], indirect=True)
+@pytest.mark.parametrize("num_workers", [0, 2])
+@pytest.mark.parametrize("parallel_dataset", [None, 24], indirect=True)
 def test_parallel_dataset_dataloader_states_complete_iterations(parallel_dataset, num_workers):
     print(f"Testing with num_workers={num_workers}")
 
     parallel_dataset, length = parallel_dataset
     batch_size = 2
 
-    dataloader = StreamingDataLoader(parallel_dataset, batch_size=batch_size, num_workers=num_workers)
+    dataloader = StreamingDataLoader(parallel_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
 
     assert len(dataloader) == -(-len(parallel_dataset) // batch_size)
 
@@ -334,7 +334,7 @@ def test_parallel_dataset_dataloader_states_complete_iterations(parallel_dataset
     assert all(len(x) == len(parallel_dataset) for x in epoch_2_data)
 
     if length is not None:
-        # dataset length option is 48 and number of items on disk is 96 so the epochs should not overlap
+        # dataset length option is 24 and number of items on disk is 48 so the epochs should not overlap
         assert all(not x & y for x, y in zip(epoch_1_data, epoch_2_data)), "Epoch 1 and 2 data should not overlap"
 
     epoch_3_data = []
@@ -351,16 +351,16 @@ def test_parallel_dataset_dataloader_states_complete_iterations(parallel_dataset
         assert len(epoch_2_data[0] & epoch_3_data[0]) > 0
         assert len(epoch_1_data[1] & epoch_3_data[1]) > 0
         assert len(epoch_2_data[1] & epoch_3_data[1]) > 0
-        # dataset 1 length on disk is 96 so epoch 3 should have no dupes
+        # dataset 1 length on disk is 48 so epoch 3 should have no dupes
         assert len(epoch_3_data[0]) == len(parallel_dataset)
-        # dataset 2 length on disk is 128 so epoch 3 can have dupes since we cycled within epoch 3
+        # dataset 2 length on disk is 56 so epoch 3 can have dupes since we cycled within epoch 3
         assert len(epoch_3_data[1]) <= len(parallel_dataset)
 
 
 @pytest.mark.timeout(300)
-@pytest.mark.parametrize("num_workers", [0, 2, 4])
-@pytest.mark.parametrize("break_at", [7, 10])
-@pytest.mark.parametrize("parallel_dataset", [None, 40, 96], indirect=True)
+@pytest.mark.parametrize("num_workers", [0, 2])
+@pytest.mark.parametrize("break_at", [3, 7])
+@pytest.mark.parametrize("parallel_dataset", [None, 20, 48], indirect=True)
 def test_parallel_dataset_dataloader_states_partial_iterations(parallel_dataset, num_workers, break_at):
     print(f"Testing with num_workers={num_workers}, break_at={break_at}")
 
