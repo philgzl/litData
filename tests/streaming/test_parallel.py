@@ -49,8 +49,7 @@ def test_parallel_dataset_errors():
     with pytest.raises(ValueError, match="Invalid ParallelStreamingDataset _length attribute"):
         len(dset)
     dset = TestParallelStreamingDataset([range(0), range(5)], length=1)
-    with pytest.raises(RuntimeError, match="Failed to get sample from dataset after cycling"):
-        list(dset)
+    assert list(dset) == []
     dset = TestParallelStreamingDataset([range(0), range(5)], length=-1)
     assert list(iter(dset)) == []  # negative length is actually supported
 

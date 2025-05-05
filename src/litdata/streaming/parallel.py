@@ -239,6 +239,7 @@ class _ParallelDatasetIterator(Iterator):
             _reset = True
             try:
                 sample = next(self._dataset_iters[dataset_index])
-            except StopIteration:
-                raise RuntimeError("Failed to get sample from dataset after cycling. Is the dataset empty?")
+            except StopIteration as e:
+                # The dataset is empty or this worker got 0 samples assigned. Either way raise the StopIteration.
+                raise e
         return sample, _reset
