@@ -28,13 +28,12 @@ class _BaseStreamingDatasetWrapper(IterableDataset, ABC):
     # This includes CombinedStreamingDataset and ParallelStreamingDataset
 
     _datasets: List[StreamingDataset]
-    _iterator: "Optional[_BaseDatasetWrapperIterator]"
     _current_epoch: int
     batch_size: int
     num_workers: int
     _force_override_state_dict: bool
     _use_streaming_dataloader: bool
-    _num_samples_yielded: Optional[List[int]]
+    _num_samples_yielded: Optional[Dict[int, List[int]]] = None
 
     def set_shuffle(self, shuffle: bool) -> None:
         """Set the current shuffle to the datasets."""
@@ -70,15 +69,6 @@ class _BaseStreamingDatasetWrapper(IterableDataset, ABC):
     def _set_use_streaming_dataloader(self, use_streaming_dataloader: bool) -> None:
         # Used to prevent returning num_samples_yielded when using PyTorch DataLoader
         self._use_streaming_dataloader = use_streaming_dataloader
-
-    def state_dict(
-        self, num_workers: int, batch_size: int, num_samples_yielded: Optional[List[int]] = None
-    ) -> Dict[str, Any]:
-        if self._iterator is None:
-            if num_samples_yielded is None:
-                return {}
-            return _state_dict(self._datasets, num_samples_yielded, num_workers, batch_size)
-        return self._iterator.state_dict(num_workers, batch_size)
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         if not state_dict:
@@ -119,21 +109,10 @@ class _BaseStreamingDatasetWrapper(IterableDataset, ABC):
     @abstractmethod
     def __len__(self) -> Optional[int]: ...
 
+    @abstractmethod
+    def state_dict(
+        self, num_workers: int, batch_size: int, num_samples_yielded: Optional[List[int]] = None
+    ) -> Dict[str, Any]: ...
 
-class _BaseDatasetWrapperIterator(Iterator, ABC):
-    _datasets: List[StreamingDataset]
-    _num_samples_yielded: List[int]
-
-    def state_dict(self, num_workers: int = 0, batch_size: int = 1) -> Dict[str, Any]:
-        return _state_dict(self._datasets, self._num_samples_yielded, num_workers, batch_size)
-
-
-def _state_dict(
-    datasets: List[StreamingDataset], num_samples_yielded: List[int], num_workers: int = 0, batch_size: int = 1
-) -> Dict[str, Any]:
-    return {
-        str(dataset_idx): dataset.state_dict(
-            num_samples_yielded=num_samples_yielded[dataset_idx], num_workers=num_workers, batch_size=batch_size
-        )
-        for dataset_idx, dataset in enumerate(datasets)
-    }
+    @abstractmethod
+    def __iter__(self) -> Iterator[Any]: ...

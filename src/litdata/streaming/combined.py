@@ -14,14 +14,13 @@
 import logging
 import random
 from copy import deepcopy
-from typing import Any, Iterator, List, Literal, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Literal, Optional, Sequence
 
 from litdata.debugger import ChromeTraceColors, _get_log_msg
 from litdata.streaming.dataset import StreamingDataset
 from litdata.utilities.base import (
     __NUM_SAMPLES_YIELDED_KEY__,
     __SAMPLES_KEY__,
-    _BaseDatasetWrapperIterator,
     _BaseStreamingDatasetWrapper,
 )
 from litdata.utilities.env import _WorkerEnv
@@ -100,7 +99,7 @@ class CombinedStreamingDataset(_BaseStreamingDatasetWrapper):
 
         self._iterator: Optional[_CombinedDatasetIterator] = None
         self._use_streaming_dataloader = False
-        self._num_samples_yielded: Optional[List[int]] = None
+        self._num_samples_yielded: Optional[Dict[int, List[int]]] = None
         self._current_epoch = 0
         self.num_workers = 1
         self.batch_size = 1
@@ -152,8 +151,17 @@ class CombinedStreamingDataset(_BaseStreamingDatasetWrapper):
         )
         return self._iterator
 
+    def state_dict(
+        self, num_workers: int, batch_size: int, num_samples_yielded: Optional[List[int]] = None
+    ) -> Dict[str, Any]:
+        if self._iterator is None:
+            if num_samples_yielded is None:
+                return {}
+            return _state_dict(self._datasets, num_samples_yielded, num_workers, batch_size)
+        return self._iterator.state_dict(num_workers, batch_size)
 
-class _CombinedDatasetIterator(_BaseDatasetWrapperIterator):
+
+class _CombinedDatasetIterator(Iterator):
     def __init__(
         self,
         datasets: List[StreamingDataset],
@@ -262,3 +270,17 @@ class _CombinedDatasetIterator(_BaseDatasetWrapperIterator):
                 __NUM_SAMPLES_YIELDED_KEY__: self._num_samples_yielded,
             }
         return sample
+
+    def state_dict(self, num_workers: int = 0, batch_size: int = 1) -> Dict[str, Any]:
+        return _state_dict(self._datasets, self._num_samples_yielded, num_workers, batch_size)
+
+
+def _state_dict(
+    datasets: List[StreamingDataset], num_samples_yielded: List[int], num_workers: int = 0, batch_size: int = 1
+) -> Dict[str, Any]:
+    return {
+        str(dataset_idx): dataset.state_dict(
+            num_samples_yielded=num_samples_yielded[dataset_idx], num_workers=num_workers, batch_size=batch_size
+        )
+        for dataset_idx, dataset in enumerate(datasets)
+    }

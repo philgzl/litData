@@ -12,6 +12,7 @@
 # limitations under the License.
 
 import logging
+from copy import deepcopy
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from litdata.streaming.dataset import StreamingDataset
@@ -19,7 +20,6 @@ from litdata.utilities.base import (
     __NUM_CYCLES_KEY__,
     __NUM_SAMPLES_YIELDED_KEY__,
     __SAMPLES_KEY__,
-    _BaseDatasetWrapperIterator,
     _BaseStreamingDatasetWrapper,
 )
 from litdata.utilities.env import _WorkerEnv
@@ -65,8 +65,8 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         self._force_override_state_dict = force_override_state_dict
         self._iterator: Optional[_ParallelDatasetIterator] = None
         self._use_streaming_dataloader = False
-        self._num_samples_yielded: Optional[List[int]] = None
-        self._num_cycles: Optional[List[int]] = None
+        self._num_samples_yielded: Optional[Dict[int, List[int]]] = None
+        self._num_cycles: Optional[Dict[int, List[int]]] = None
         self._current_epoch = 0
         self.num_workers = 1
         self.batch_size = 1
@@ -131,7 +131,9 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         return self.get_len(self.num_workers, self.batch_size if self.batch_size else 1)
 
     def _get_num_samples_yielded(
-        self, num_samples_yielded: Dict[int, List[int]], num_cycles: Dict[int, List[int]]
+        self,
+        num_samples_yielded: Optional[Dict[str, List[int]]] = None,
+        num_cycles: Optional[Dict[str, List[int]]] = None,
     ) -> Tuple[List[int], List[int]]:
         """Get the number of samples yielded and the number of cycles for each dataset across workers.
 
@@ -148,6 +150,8 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
             A tuple of two lists: the total number of samples yielded by each dataset across workers, and the number of
             times each dataset was cycled.
         """
+        num_samples_yielded = num_samples_yielded or self._num_samples_yielded or {}
+        num_cycles = num_cycles or self._num_cycles or {}
         assert num_samples_yielded.keys() == num_cycles.keys()
         assert all(len(s) == len(c) for s, c in zip(num_samples_yielded.values(), num_cycles.values()))
         output = [0 for _ in range(len(self._datasets))]
@@ -164,8 +168,23 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         if self._use_streaming_dataloader:
             self._num_cycles = state_dict["num_cycles"]
 
+    def state_dict(
+        self, num_workers: int, batch_size: int, num_samples_yielded: Optional[List[int]] = None
+    ) -> Dict[str, Any]:
+        if self._iterator is None and num_samples_yielded is None:
+            return {}
+        num_samples_yielded = num_samples_yielded or [0 for _ in range(len(self._datasets))]
+        return {
+            str(dataset_idx): deepcopy(
+                dataset.state_dict(
+                    num_samples_yielded=num_samples_yielded[dataset_idx], num_workers=num_workers, batch_size=batch_size
+                )
+            )
+            for dataset_idx, dataset in enumerate(self._datasets)
+        }
 
-class _ParallelDatasetIterator(_BaseDatasetWrapperIterator):
+
+class _ParallelDatasetIterator(Iterator):
     def __init__(
         self,
         datasets: List[StreamingDataset],
