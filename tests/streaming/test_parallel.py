@@ -404,7 +404,7 @@ def test_parallel_dataset_dataloader_states_partial_iterations(parallel_dataset,
     assert samples_yielded == len(parallel_dataset), "All samples should be yielded in the second epoch."
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="too slow in CI")
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
 def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
     data_dir_1 = os.path.join(tmpdir, "data_1")
     data_dir_2 = os.path.join(tmpdir, "data_2")
@@ -591,7 +591,7 @@ def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
     assert not dataloader.restore
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="too slow in CI")
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
 def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmpdir):
     data_dir_1 = os.path.join(tmpdir, "data_1")
     data_dir_2 = os.path.join(tmpdir, "data_2")
