@@ -11,9 +11,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import hashlib
+import inspect
 import logging
+import random
 from copy import deepcopy
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Literal, Optional, Protocol, Tuple, Union
+
+import numpy as np
+import torch
 
 from litdata.streaming.dataset import StreamingDataset
 from litdata.utilities.base import (
@@ -26,17 +32,50 @@ from litdata.utilities.env import _WorkerEnv
 
 logger = logging.getLogger("litdata.streaming.parallel")
 
+RandomGenerator = Union[random.Random, np.random.Generator, torch.Generator]
+GeneratorName = Literal["random", "numpy", "torch"]
+
+
+class Transform(Protocol):
+    def __call__(self, samples: Tuple[Any, ...], rng: Optional[Dict[GeneratorName, RandomGenerator]] = None) -> Any: ...
+
 
 class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
     """Enables to stream data from multiple StreamingDataset in parallel.
 
-    The yielded samples are tuples where the `n`-th element is a sample from the `n`-th dataset.
+    By default, the yielded samples are tuples where the `n`-th element is a sample from the `n`-th dataset.
 
     Additionally, the parallel dataset keeps track of the number of samples fetched to enable reusability of the
     datasets.
 
     The parallel dataset can be configured to raise a ``StopIteration`` as soon as any of the datasets is exhausted, or
     to cycle through the datasets until a given number of samples are yielded.
+
+    New data can be generated on-the-fly from a sample from each dataset by providing a ``transform`` function. This
+    function can take a single tuple argument containing a sample from each dataset, and optionally a dictionary of
+    random number generators which are seeded using the current state of the dataset. The keys of this dictionary are
+    ``"random"``, ``"numpy"`` and ``"torch"``, and the values are instances of ``random.Random``,
+    ``numpy.random.Generator`` and ``torch.Generator`` respectively. This is useful if the data transformation
+    requires random number generation which should be resumable.
+
+    Example:
+        >>> def transform(samples):
+        >>>     sample_1, sample_2 = samples
+        >>>     return sample_1 + sample_2
+        ...
+        >>> # or using random number generators
+        >>> def transform(samples, rngs):
+        >>>     sample_1, sample_2 = samples
+        >>>     rng = rngs["random"]
+        >>>     return rng.random() * sample_1 + rng.random() * sample_2
+        ...
+        >>> dset_1 = StreamingDataset(...)
+        >>> dset_2 = StreamingDataset(...)
+        >>> parallel_dset = ParallelStreamingDataset(
+        >>>     datasets=[dset_1, dset_2],
+        >>>     transform=transform,
+        >>> )
+
     """
 
     def __init__(
@@ -44,6 +83,9 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         datasets: List[StreamingDataset],
         length: Optional[Union[int, float]] = None,
         force_override_state_dict: bool = False,
+        transform: Optional[Transform] = None,
+        seed: int = 42,
+        reset_rngs: bool = False,
     ) -> None:
         """Enable to stream data from multiple StreamingDataset in parallel.
 
@@ -53,16 +95,30 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
                 exhausted. If an integer, the datasets are cycled until ``length`` samples are yielded. Can be
                 ``float("inf")`` for an infinite dataset.
             force_override_state_dict: Boolean flag for allowing local arguments to override a loaded state dict.
-
+            transform: A function to apply to the samples yielded by the datasets to generate new data. Takes as
+                argument a tuple containing one sample from each dataset, and optionally a dictionary of random
+                number generators which are seeded using the current state of the dataset.
+            seed: Seed for the random number generators provided to ``transform``.
+            reset_rngs: If ``True``, the random number generators provided to ``transform`` are reset to their initial
+                state at the beginning of each epoch. Together with ``length=None`` and ``shuffle=False``, this ensures
+                that the same samples are yielded in each epoch.
         """
         self._check_datasets(datasets)
 
         if length is not None and not isinstance(length, int) and length != float("inf"):
             raise ValueError(f"`length` must be `None`, an integer, or `float('inf')`, got {length}.")
 
+        transform_nargs = None if transform is None else len(inspect.signature(transform).parameters)
+        if transform_nargs is not None and transform_nargs not in (1, 2):
+            raise ValueError(f"transform function must take 1 or 2 arguments, got {transform_nargs} instead.")
+
         self._datasets = datasets
         self._length = length
         self._force_override_state_dict = force_override_state_dict
+        self._transform = transform
+        self._transform_nargs = transform_nargs
+        self._seed = seed
+        self._reset_rngs = reset_rngs
         self._iterator: Optional[_ParallelDatasetIterator] = None
         self._use_streaming_dataloader = False
         self._num_samples_yielded: Optional[Dict[int, List[int]]] = None
@@ -113,13 +169,38 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
             length = length // worker_env.world_size + (worker_env.rank < length % worker_env.world_size)
 
         # convert the true length of each dataset i.e. the cycle length to the corresponding value for current worker
+        tot_dset_lengths = [self._get_len(d) for d in self._datasets]
         dset_lengths = [
-            self._get_len(d) // worker_env.world_size + (worker_env.rank < self._get_len(d) % worker_env.world_size)
-            for d in self._datasets
+            dl // worker_env.world_size + (worker_env.rank < dl % worker_env.world_size) for dl in tot_dset_lengths
         ]
 
+        # compute random seed based on the current dataset state and initialize generators
+        tot_samples_yielded, tot_cycles = self._get_num_samples_yielded()
+        tot_samples_yielded = [0 if dl == 0 else s % dl for s, dl in zip(tot_samples_yielded, tot_dset_lengths)]
+        if self._reset_rngs:
+            state = (self._seed, worker_env.rank, *tot_samples_yielded)
+        elif self._length is None:
+            state = (self._seed, worker_env.rank, *tot_samples_yielded, self._current_epoch)
+        else:
+            state = (self._seed, worker_env.rank, *tot_samples_yielded, *tot_cycles)
+        # produce a seed from the state in a stable way; there might be a better way to do this
+        seed = int(hashlib.sha256(str(state).encode()).hexdigest(), 16) % (2**32 - 1)
+        rngs: Dict[GeneratorName, RandomGenerator] = {
+            "random": random.Random(seed),  # noqa: S311
+            "numpy": np.random.default_rng(seed),
+            "torch": torch.Generator().manual_seed(seed),
+        }
+
         self._iterator = _ParallelDatasetIterator(
-            self._datasets, self._use_streaming_dataloader, num_samples_yielded, num_cycles, length, dset_lengths
+            self._datasets,
+            self._use_streaming_dataloader,
+            num_samples_yielded,
+            num_cycles,
+            length,
+            dset_lengths,
+            self._transform,
+            self._transform_nargs,
+            rngs,
         )
         return self._iterator
 
@@ -193,6 +274,9 @@ class _ParallelDatasetIterator(Iterator):
         num_cycles: Any,
         length: Optional[Union[int, float]],
         dset_lengths: List[int],
+        transform: Optional[Transform],
+        transform_nargs: Optional[int],
+        rngs: Dict[GeneratorName, RandomGenerator],
     ) -> None:
         self._datasets = datasets
         self._dataset_iters = [iter(dataset) for dataset in datasets]
@@ -200,9 +284,11 @@ class _ParallelDatasetIterator(Iterator):
         self._num_cycles = num_cycles or [0 for _ in range(len(datasets))]
         self._length = length
         self._use_streaming_dataloader = use_streaming_dataloader
-        if self._length in [None, float("inf"), 0]:
-            self._count = 0
-        else:
+        self._transform = transform
+        self._transform_nargs = transform_nargs
+        self._rngs = rngs
+        self._count = 0
+        if isinstance(self._length, int):
             # infer counter resume value from the number of times we cycled, the number of samples yielded in the
             # current cycle, the dataset length i.e. cycle length, and the length option
             self._count = (dset_lengths[0] * self._num_cycles[0] + self._num_samples_yielded[0]) % self._length
@@ -211,7 +297,17 @@ class _ParallelDatasetIterator(Iterator):
                 for i in range(1, len(dset_lengths))
             )
 
-    def __next__(self) -> Union[Tuple[Any], Dict[str, Any]]:
+    def transform(self, samples: Tuple[Any, ...]) -> Any:
+        if self._transform is None:
+            return samples
+        assert self._transform_nargs is not None
+        if self._transform_nargs == 1:
+            return self._transform(samples)
+        if self._transform_nargs == 2:
+            return self._transform(samples, self._rngs)
+        raise RuntimeError(f"transform function must take 1 or 2 arguments, got {self._transform_nargs} instead.")
+
+    def __next__(self) -> Union[Any, Dict[str, Any]]:
         if self._length is not None and self._count >= self._length:
             raise StopIteration
         samples, _resets = zip(*[self._get_sample(i) for i in range(len(self._datasets))])
@@ -220,6 +316,7 @@ class _ParallelDatasetIterator(Iterator):
             self._num_samples_yielded[i] = 1 if _reset else self._num_samples_yielded[i] + 1
             self._num_cycles[i] = self._num_cycles[i] + 1 if _reset else self._num_cycles[i]
         self._count += 1
+        samples = self.transform(samples)
         if self._use_streaming_dataloader:
             return {
                 __SAMPLES_KEY__: samples,

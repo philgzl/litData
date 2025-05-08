@@ -52,6 +52,10 @@ def test_parallel_dataset_errors():
     assert list(dset) == []
     dset = TestParallelStreamingDataset([range(0), range(5)], length=-1)
     assert list(iter(dset)) == []  # negative length is actually supported
+    with pytest.raises(ValueError, match="transform function must take 1 or 2 arguments"):
+        TestParallelStreamingDataset([range(5), range(5)], transform=lambda: 0)
+    with pytest.raises(ValueError, match="transform function must take 1 or 2 arguments"):
+        TestParallelStreamingDataset([range(5), range(5)], transform=lambda x, y, z: 0)
 
 
 @pytest.mark.parametrize(
@@ -286,6 +290,67 @@ def test_parallel_dataset_with_dataloader_and_one_worker(batch_size, length, exp
         "num_samples_yielded": {0: num_samples_yielded},
         "num_cycles": {0: num_cycles},
     }
+
+
+@pytest.mark.parametrize("length", [None, 7])
+@pytest.mark.parametrize("num_workers", [0, 2])
+@pytest.mark.parametrize("random", ["random", "numpy", "torch"])
+@pytest.mark.parametrize("reset_rngs", [False, True])
+def test_parallel_dataset_rng(length, num_workers, random, reset_rngs):
+    def transform(_, rng):
+        if random == "torch":
+            return torch.rand(1, generator=rng[random])
+        return rng[random].random()
+
+    dloader = StreamingDataLoader(
+        TestParallelStreamingDataset(
+            [DummyIterableDataset(10, 1)],
+            length=length,
+            transform=transform,
+            seed=42,
+            reset_rngs=reset_rngs,
+        ),
+        num_workers=num_workers,
+    )
+    epoch_1 = []
+    for x in dloader:
+        assert x not in epoch_1
+        epoch_1.append(x)
+    epoch_2 = []
+    for x in dloader:
+        assert x not in epoch_2
+        epoch_2.append(x)
+    for x1, x2 in zip(epoch_1, epoch_2):
+        if reset_rngs and length is None:
+            assert x1 == x2
+        else:
+            assert x1 != x2
+
+    dloader = StreamingDataLoader(
+        TestParallelStreamingDataset(
+            [DummyIterableDataset(10, 1)],
+            length=length,
+            transform=transform,
+            seed=42,
+            reset_rngs=reset_rngs,
+        ),
+        num_workers=num_workers,
+    )
+    for x, old_x in zip(dloader, epoch_1):
+        assert x == old_x
+
+    dloader = StreamingDataLoader(
+        TestParallelStreamingDataset(
+            [DummyIterableDataset(10, 1)],
+            length=length,
+            transform=transform,
+            seed=1337,
+            reset_rngs=reset_rngs,
+        ),
+        num_workers=num_workers,
+    )
+    for x, old_x in zip(dloader, epoch_1):
+        assert x != old_x
 
 
 @pytest.mark.parametrize("parallel_dataset", [None, 3, float("inf")], indirect=True)

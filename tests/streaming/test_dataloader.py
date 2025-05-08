@@ -363,20 +363,33 @@ def test_resume_dataloader_after_some_workers_are_done(tmpdir):
         assert x == expected_sequence[2]
 
 
+def simple_transform(samples):
+    x, y = samples
+    return x + y
+
+
+def rng_transform(samples, rng):
+    x, y = samples
+    return rng["random"].random() * x, rng["numpy"].random() * y, torch.rand(1, generator=rng["torch"])
+
+
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("length", [None, 7])
 @pytest.mark.parametrize("num_workers", [0, 2])
-def test_resume_parallel_dataset(tmpdir, length, num_workers):
-    dset_path = tmpdir.join("dataset_1")
-    cache = Cache(input_dir=str(dset_path), chunk_size=1)
-    for i in range(10):
-        cache[i] = i
-    cache.done()
-    cache.merge()
+@pytest.mark.parametrize("transform", [None, simple_transform, rng_transform])
+def test_resume_parallel_dataset(tmpdir, length, num_workers, transform):
+    dset_paths = [tmpdir.join(f"dataset_{i}") for i in range(2)]
+    for dset_path in dset_paths:
+        cache = Cache(input_dir=str(dset_path), chunk_size=1)
+        for i in range(10):
+            cache[i] = i
+        cache.done()
+        cache.merge()
     dloader = StreamingDataLoader(
         ParallelStreamingDataset(
-            [StreamingDataset(str(dset_path))],
+            [StreamingDataset(str(dset_path)) for dset_path in dset_paths],
             length=length,
+            transform=transform,
         ),
         num_workers=num_workers,
     )
@@ -384,8 +397,8 @@ def test_resume_parallel_dataset(tmpdir, length, num_workers):
         pass
     state = dloader.state_dict()
     data = []
-    for (x,) in dloader:
+    for x in dloader:
         data.append(x)
     dloader.load_state_dict(state)
-    for i, (x,) in enumerate(dloader):
+    for i, x in enumerate(dloader):
         assert x == data[i]
