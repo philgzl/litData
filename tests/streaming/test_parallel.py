@@ -506,18 +506,18 @@ def test_parallel_dataset_dataloader_states_partial_iterations(parallel_dataset,
 
 
 @pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
-def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
-    data_dir_1 = os.path.join(tmpdir, "data_1")
-    data_dir_2 = os.path.join(tmpdir, "data_2")
-    cache_dir_1 = os.path.join(tmpdir, "cache_dir_1")
-    cache_dir_2 = os.path.join(tmpdir, "cache_dir_2")
+def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmp_path):
+    data_dir_1 = str(tmp_path / "data_1")
+    data_dir_2 = str(tmp_path / "data_2")
+    cache_dir_1 = str(tmp_path / "cache_dir_1")
+    cache_dir_2 = str(tmp_path / "cache_dir_2")
 
     os.makedirs(data_dir_1)
     os.makedirs(data_dir_2)
     os.makedirs(cache_dir_1)
     os.makedirs(cache_dir_2)
 
-    cache = Cache(input_dir=str(data_dir_1), chunk_size=2)
+    cache = Cache(input_dir=data_dir_1, chunk_size=2)
 
     for i in range(12):
         cache[i] = i
@@ -525,7 +525,7 @@ def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
     cache.done()
     cache.merge()
 
-    cache = Cache(input_dir=str(data_dir_2), chunk_size=2)
+    cache = Cache(input_dir=data_dir_2, chunk_size=2)
 
     for i in range(14):
         cache[i] = -i
@@ -693,18 +693,18 @@ def test_parallel_dataset_with_dataloader_2_epochs_none_length(tmpdir):
 
 
 @pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
-def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmpdir):
-    data_dir_1 = os.path.join(tmpdir, "data_1")
-    data_dir_2 = os.path.join(tmpdir, "data_2")
-    cache_dir_1 = os.path.join(tmpdir, "cache_dir_1")
-    cache_dir_2 = os.path.join(tmpdir, "cache_dir_2")
+def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmp_path):
+    data_dir_1 = str(tmp_path / "data_1")
+    data_dir_2 = str(tmp_path / "data_2")
+    cache_dir_1 = str(tmp_path / "cache_dir_1")
+    cache_dir_2 = str(tmp_path / "cache_dir_2")
 
     os.makedirs(data_dir_1)
     os.makedirs(data_dir_2)
     os.makedirs(cache_dir_1)
     os.makedirs(cache_dir_2)
 
-    cache = Cache(input_dir=str(data_dir_1), chunk_size=2)
+    cache = Cache(input_dir=data_dir_1, chunk_size=2)
 
     for i in range(18):
         cache[i] = i
@@ -712,7 +712,7 @@ def test_parallel_dataset_with_dataloader_2_epochs_int_length(tmpdir):
     cache.done()
     cache.merge()
 
-    cache = Cache(input_dir=str(data_dir_2), chunk_size=2)
+    cache = Cache(input_dir=data_dir_2, chunk_size=2)
 
     for i in range(20):
         cache[i] = -i

@@ -63,9 +63,9 @@ def combined_dataset(tmpdir_factory):
 
 
 @pytest.fixture
-def parallel_dataset(tmpdir_factory, request):
-    tmpdir = tmpdir_factory.mktemp("data")
-    datasets = [str(tmpdir.join(f"dataset_{i}")) for i in range(2)]
+def parallel_dataset(tmp_path_factory, request):
+    tmpdir = tmp_path_factory.mktemp("data")
+    datasets = [str(tmpdir / f"dataset_{i}") for i in range(2)]
     for dataset, num_items in zip(datasets, [48, 56]):
         cache = Cache(input_dir=dataset, chunk_size=10)
         for i in range(num_items):
