@@ -108,9 +108,14 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         if length is not None and not isinstance(length, int) and length != float("inf"):
             raise ValueError(f"`length` must be `None`, an integer, or `float('inf')`, got {length}.")
 
-        transform_nargs = None if transform is None else len(inspect.signature(transform).parameters)
-        if transform_nargs is not None and transform_nargs not in (1, 2):
-            raise ValueError(f"transform function must take 1 or 2 arguments, got {transform_nargs} instead.")
+        transform_nargs = None
+        if transform is not None:
+            transform_nargs = sum(
+                p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.POSITIONAL_ONLY)
+                for p in inspect.signature(transform).parameters.values()
+            )
+            if transform_nargs not in (1, 2):
+                raise ValueError(f"transform function must take 1 or 2 arguments, got {transform_nargs} instead.")
 
         self._datasets = datasets
         self._length = length

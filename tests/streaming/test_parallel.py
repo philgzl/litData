@@ -1,3 +1,4 @@
+import functools
 import os
 import sys
 from copy import deepcopy
@@ -52,10 +53,40 @@ def test_parallel_dataset_errors():
     assert list(dset) == []
     dset = TestParallelStreamingDataset([range(0), range(5)], length=-1)
     assert list(iter(dset)) == []  # negative length is actually supported
+
+
+def test_parallel_transform_errors():
     with pytest.raises(ValueError, match="transform function must take 1 or 2 arguments"):
-        TestParallelStreamingDataset([range(5), range(5)], transform=lambda: 0)
+        TestParallelStreamingDataset([range(5), range(5)], transform=lambda: None)
+
     with pytest.raises(ValueError, match="transform function must take 1 or 2 arguments"):
-        TestParallelStreamingDataset([range(5), range(5)], transform=lambda x, y, z: 0)
+        TestParallelStreamingDataset([range(5), range(5)], transform=lambda x, y, z: None)
+
+    TestParallelStreamingDataset([range(5), range(5)], transform=functools.partial(lambda x, y, z: None, z=None))
+
+    TestParallelStreamingDataset(
+        [range(5), range(5)], transform=functools.partial(lambda x, y, z: None, y=None, z=None)
+    )
+
+    with pytest.raises(ValueError, match="transform function must take 1 or 2 arguments"):
+        TestParallelStreamingDataset(
+            [range(5), range(5)], transform=functools.partial(lambda x, y, z: 0, x=None, y=None, z=None)
+        )
+
+    def transform(x, y, z=None): ...
+
+    with pytest.raises(ValueError, match="transform function must take 1 or 2 arguments"):
+        TestParallelStreamingDataset([range(5), range(5)], transform=transform)
+
+    TestParallelStreamingDataset([range(5), range(5)], transform=functools.partial(transform, z=None))
+
+    def transform(x, y=None): ...
+
+    TestParallelStreamingDataset([range(5), range(5)], transform=transform)
+
+    def transform(x=None, y=None): ...
+
+    TestParallelStreamingDataset([range(5), range(5)], transform=transform)
 
 
 @pytest.mark.parametrize(
@@ -292,15 +323,18 @@ def test_parallel_dataset_with_dataloader_and_one_worker(batch_size, length, exp
     }
 
 
+def rng_transform(_, rngs, which):
+    if which == "torch":
+        return torch.rand(1, generator=rngs[which])
+    return rngs[which].random()
+
+
 @pytest.mark.parametrize("length", [None, 7])
 @pytest.mark.parametrize("num_workers", [0, 2])
-@pytest.mark.parametrize("random", ["random", "numpy", "torch"])
+@pytest.mark.parametrize("which", ["random", "numpy", "torch"])
 @pytest.mark.parametrize("reset_rngs", [False, True])
-def test_parallel_dataset_rng(length, num_workers, random, reset_rngs):
-    def transform(_, rng):
-        if random == "torch":
-            return torch.rand(1, generator=rng[random])
-        return rng[random].random()
+def test_parallel_dataset_rng(length, num_workers, which, reset_rngs):
+    transform = functools.partial(rng_transform, which=which)
 
     dloader = StreamingDataLoader(
         TestParallelStreamingDataset(
