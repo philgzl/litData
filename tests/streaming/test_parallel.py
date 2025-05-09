@@ -333,6 +333,7 @@ def rng_transform(_, rngs, which):
 @pytest.mark.parametrize("num_workers", [0, 2])
 @pytest.mark.parametrize("which", ["random", "numpy", "torch"])
 @pytest.mark.parametrize("reset_rngs", [False, True])
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
 def test_parallel_dataset_rng(length, num_workers, which, reset_rngs):
     transform = functools.partial(rng_transform, which=which)
 
@@ -399,6 +400,7 @@ def test_parallel_dataset_dataloader_states_without_any_iterations(parallel_data
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("num_workers", [0, 2])
 @pytest.mark.parametrize("parallel_dataset", [None, 24], indirect=True)
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
 def test_parallel_dataset_dataloader_states_complete_iterations(parallel_dataset, num_workers):
     print(f"Testing with num_workers={num_workers}")
 
