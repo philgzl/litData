@@ -49,7 +49,8 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
     datasets.
 
     The parallel dataset can be configured to raise a ``StopIteration`` as soon as any of the datasets is exhausted, or
-    to cycle through the datasets until a given number of samples are yielded.
+    to cycle through the datasets until a given number of samples are yielded. When cycling, each epoch resumes from
+    where the previous one left off in the current cycle, i.e. the yielded samples are not the same across epochs.
 
     New data can be generated on-the-fly from a sample from each dataset by providing a ``transform`` function. This
     function can take a single tuple argument containing a sample from each dataset, and optionally a dictionary of
