@@ -653,7 +653,7 @@ for batch in tqdm(train_dataloader):
   <summary> ✅ Parallel streaming</summary>
 &nbsp;
 
-While `CombinedDataset` yields a sample from one of the datasets it wraps at each iteration, `ParallelStreamingDataset` yields a sample from all the datasets it wraps at each iteration:
+While `CombinedDataset` allows to fetch a sample from one of the datasets it wraps at each iteration, `ParallelStreamingDataset` can be used to fetch a sample from all the wrapped datasets at each iteration:
 
 ```python
 from litdata import StreamingDataset, ParallelStreamingDataset, StreamingDataLoader
@@ -672,7 +672,7 @@ for batch_1, batch_2 in tqdm(dataloader):
     pass
 ```
 
-This is useful to generate new data on-the-fly using a sample from each dataset. To do so, a ``transform`` function can be provided to `ParallelStreamingDataset`:
+This is useful to generate new data on-the-fly using a sample from each dataset. To do so, provide a ``transform`` function to `ParallelStreamingDataset`:
 
 ```python
 def transform(samples: Tuple[Any]):
@@ -687,10 +687,10 @@ for transformed_batch in tqdm(dataloader):
     pass
 ```
 
-If the transformation requires random number generation, internal random number generators are available. These are seeded using the current dataset state, which allows for reproducible and resumable data transformation. To use them, define a ``transform`` which takes a dictionary of random number generators as its second argument:
+If the transformation requires random number generation, internal random number generators provided by `ParallelStreamingDataset` can be used. These are seeded using the current dataset state at the beginning of each epoch, which allows for reproducible and resumable data transformation. To use them, define a ``transform`` which takes a dictionary of random number generators as its second argument:
 
 ```python
-def transform(samples: Tuple[Any], rngs: Dict[str: Any]):
+def transform(samples: Tuple[Any], rngs: Dict[str, Any]):
     sample_1, sample_2 = samples  # as many samples as wrapped datasets
     rng = rngs["random"]  # "random", "numpy" and "torch" keys available
     return rng.random() * sample_1 + rng.random() * sample_2  # example transformation
@@ -700,7 +700,7 @@ parallel_dataset = ParallelStreamingDataset([dset_1, dset_2], transform=transfor
 </details>
 
 <details>
-  <summary> ✅ Cycling datasets</summary>
+  <summary> ✅ Cycle datasets</summary>
 &nbsp;
 
 `ParallelStreamingDataset` can also be used to cycle a `StreamingDataset`. This allows to dissociate the epoch length from the number of samples in the dataset.
