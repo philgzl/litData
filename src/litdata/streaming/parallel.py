@@ -149,6 +149,8 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
     def get_len(self, num_workers: int, batch_size: int) -> Optional[int]:
         self.num_workers = num_workers
         self.batch_size = batch_size
+        # initialize lengths even if self._length is not None to call self._get_len() on all the wrapped datasets and
+        # set their num_workers and batch_size attributes
         lengths = [self._get_len(d) for d in self._datasets]
         if self._length is None:
             return min(lengths)
