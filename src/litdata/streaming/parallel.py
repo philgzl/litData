@@ -138,27 +138,54 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
                 if isinstance(dataset, StreamingDataset):
                     dataset.set_epoch(1)
 
+    def is_cycling(self) -> bool:
+        if self._length is None:
+            return False
+        if isinstance(self._length, int) or self._length == float("inf"):
+            return True
+        raise ValueError(f"ParallelStreamingDataset length must be None, int, or float('inf'), got {self._length}.")
+
+    def is_infinite(self) -> bool:
+        if self._length is None or isinstance(self._length, int):
+            return False
+        if self._length == float("inf"):
+            return True
+        raise ValueError(f"ParallelStreamingDataset length must be None, int, or float('inf'), got {self._length}.")
+
     def set_epoch(self, current_epoch: int) -> None:
         self._current_epoch = current_epoch
-        if self._length is not None:
+        if self.is_cycling():
             # do not set the epoch as cycling datasets have their own epoch counter
             return
         for dataset in self._datasets:
             dataset.set_epoch(current_epoch)
+
+    def update_epoch_counters(self, num_cycles: list[int]) -> None:
+        """Update the epoch counter of the wrapped datasets when cycling."""
+        if self.is_cycling():
+            assert len(num_cycles) == len(self._datasets)
+            for i_cycle, dset in zip(num_cycles, self._datasets):
+                # epoch counter starts at 1 while cycle counter starts at 0
+                if dset.current_epoch != i_cycle + 1:
+                    # do not call dset.set_epoch as it is ignored if the dataset has non-None _state_dict attribute
+                    dset.current_epoch = i_cycle + 1
 
     def get_len(self, num_workers: int, batch_size: int) -> Optional[int]:
         self.num_workers = num_workers
         self.batch_size = batch_size
         # initialize lengths even if self._length is not None to call self._get_len() on all the wrapped datasets and
         # set their num_workers and batch_size attributes
-        lengths = [self._get_len(d) for d in self._datasets]
+        lengths = self.get_all_lens()
         if self._length is None:
             return min(lengths)
         if self._length == float("inf"):
             return None
         if isinstance(self._length, int):
             return self._length
-        raise ValueError(f"Invalid ParallelStreamingDataset _length attribute: {self._length}.")
+        raise ValueError(f"ParallelStreamingDataset length must be None, int, or float('inf'), got {self._length}.")
+
+    def get_all_lens(self) -> List[int]:
+        return [self._get_len(d) for d in self._datasets]
 
     def __iter__(self) -> Iterator[Any]:
         worker_env = _WorkerEnv.detect()
@@ -173,17 +200,17 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
 
         # convert the length option to the corresponding number of samples for the current worker
         length = self._length
-        if length is not None and length != float("inf"):
+        if isinstance(length, int):
             length = length // worker_env.world_size + (worker_env.rank < length % worker_env.world_size)
 
         # convert the true length of each dataset i.e. the cycle length to the corresponding value for current worker
-        tot_dset_lengths = [self._get_len(d) for d in self._datasets]
+        tot_dset_lengths = self.get_all_lens()
         dset_lengths = [
             dl // worker_env.world_size + (worker_env.rank < dl % worker_env.world_size) for dl in tot_dset_lengths
         ]
 
         # compute random seed based on the current dataset state and initialize generators
-        tot_samples_yielded, tot_cycles = self._get_num_samples_yielded()
+        tot_samples_yielded, tot_cycles = self.get_num_samples_yielded()
         tot_samples_yielded = [0 if dl == 0 else s % dl for s, dl in zip(tot_samples_yielded, tot_dset_lengths)]
         if self._reset_rngs:
             state = (self._seed, worker_env.rank, *tot_samples_yielded)
@@ -213,13 +240,9 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         return self._iterator
 
     def __len__(self) -> Optional[int]:
-        return self._len()
-
-    def _len(self) -> Optional[int]:
-        # used internally instead of __len__ to prevent mypy error related to __len__ being able to return None
         return self.get_len(self.num_workers, self.batch_size if self.batch_size else 1)
 
-    def _get_num_samples_yielded(
+    def get_num_samples_yielded(
         self,
         num_samples_yielded: Optional[Dict[int, List[int]]] = None,
         num_cycles: Optional[Dict[int, List[int]]] = None,
@@ -296,7 +319,7 @@ class _ParallelDatasetIterator(Iterator):
         self._transform_nargs = transform_nargs
         self._rngs = rngs
         self._count = 0
-        if isinstance(self._length, int):
+        if isinstance(self._length, int) and self._length > 0:
             # infer counter resume value from the number of times we cycled, the number of samples yielded in the
             # current cycle, the dataset length i.e. cycle length, and the length option
             self._count = (dset_lengths[0] * self._num_cycles[0] + self._num_samples_yielded[0]) % self._length
@@ -304,6 +327,8 @@ class _ParallelDatasetIterator(Iterator):
                 (dset_lengths[i] * self._num_cycles[i] + self._num_samples_yielded[i]) % self._length == self._count
                 for i in range(1, len(dset_lengths))
             )
+        else:
+            self._count = 0
 
     def transform(self, samples: Tuple[Any, ...]) -> Any:
         if self._transform is None:
