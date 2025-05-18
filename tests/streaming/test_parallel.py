@@ -47,8 +47,12 @@ def test_parallel_dataset_errors():
         TestParallelStreamingDataset([range(5), range(5)], length="foo")
     dset = TestParallelStreamingDataset([range(5), range(5)])
     dset._length = "foo"
-    with pytest.raises(ValueError, match="Invalid ParallelStreamingDataset _length attribute"):
+    with pytest.raises(ValueError, match="ParallelStreamingDataset length must be"):
         len(dset)
+    with pytest.raises(ValueError, match="ParallelStreamingDataset length must be"):
+        dset.is_cycling()
+    with pytest.raises(ValueError, match="ParallelStreamingDataset length must be"):
+        dset.is_infinite()
     dset = TestParallelStreamingDataset([range(0), range(5)], length=1)
     assert list(dset) == []
     dset = TestParallelStreamingDataset([range(0), range(5)], length=-1)
@@ -388,6 +392,36 @@ def test_parallel_dataset_rng(length, num_workers, which, reset_rngs):
         assert x != old_x
 
 
+@pytest.mark.parametrize("shuffle", [False, True])
+def test_dataloader_shuffle(tmp_path, shuffle):
+    data_dir = str(tmp_path / "data")
+    cache = Cache(input_dir=data_dir, chunk_size=2)
+    dset_len = 7
+    for i in range(dset_len):
+        cache[i] = i
+    cache.done()
+    cache.merge()
+    # test with None length
+    dataset = ParallelStreamingDataset([StreamingDataset(input_dir=data_dir, shuffle=shuffle)], length=None)
+    dloader = StreamingDataLoader(dataset, batch_size=1)
+    epoch_1_batches = [x[0] for x in dloader]
+    assert shuffle ^ all(torch.equal(x, torch.tensor([i])) for i, x in enumerate(epoch_1_batches))
+    epoch_2_batches = [x[0] for x in dloader]
+    assert shuffle ^ all(torch.equal(x, y) for x, y in zip(epoch_1_batches, epoch_2_batches))
+    # test with int length
+    length = 5
+    dataset = ParallelStreamingDataset(
+        [StreamingDataset(input_dir=data_dir, shuffle=shuffle)],
+        length=length,
+    )
+    dloader = StreamingDataLoader(dataset, batch_size=1)
+    epoch_1_batches = [x[0] for x in dloader]
+    assert shuffle ^ all(torch.equal(x, torch.tensor([i])) for i, x in enumerate(epoch_1_batches))
+    epoch_2_batches = [x[0] for x in dloader]
+    assert shuffle ^ all(torch.equal(x, torch.tensor([(i + length) % dset_len])) for i, x in enumerate(epoch_2_batches))
+    assert shuffle ^ all(torch.equal(x, y) for x, y in zip(epoch_1_batches[:3], epoch_2_batches[-3:]))
+
+
 @pytest.mark.parametrize("parallel_dataset", [None, 3, float("inf")], indirect=True)
 def test_parallel_dataset_dataloader_states_without_any_iterations(parallel_dataset):
     parallel_dataset, _ = parallel_dataset
@@ -395,6 +429,8 @@ def test_parallel_dataset_dataloader_states_without_any_iterations(parallel_data
     assert not dataloader.restore
     dataloader.load_state_dict(dataloader.state_dict())
     assert not dataloader.restore
+    for _ in dataloader:
+        break
 
 
 @pytest.mark.timeout(120)
