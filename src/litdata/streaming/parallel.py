@@ -160,7 +160,7 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         for dataset in self._datasets:
             dataset.set_epoch(current_epoch)
 
-    def update_epoch_counters(self, num_cycles: list[int]) -> None:
+    def update_epoch_counters(self, num_cycles: List[int]) -> None:
         """Update the epoch counter of the wrapped datasets when cycling."""
         if self.is_cycling():
             assert len(num_cycles) == len(self._datasets)
