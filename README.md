@@ -719,7 +719,7 @@ print(len(cycled_dataset)))  # 100
 
 dataloader = StreamingDataLoader(cycled_dataset)
 
-for batch in tqdm(dataloader):
+for batch, in tqdm(dataloader):
     pass
 ```
 
