@@ -718,14 +718,14 @@ class StreamingDataLoader(DataLoader):
 
         if isinstance(self.dataset, CombinedStreamingDataset):
             # initialize a list to track the number of samples yielded for each dataset
-            num_samples_yieled = [0 for _ in range(len(self.dataset._datasets))]
+            num_samples_yielded = [0 for _ in range(len(self.dataset._datasets))]
 
             for worker_idx in self._num_samples_yielded_wrapper:
-                for dataset_idx, samples_yieled in enumerate(self._num_samples_yielded_wrapper[worker_idx]):
-                    num_samples_yieled[dataset_idx] += samples_yieled
+                for dataset_idx, samples_yielded in enumerate(self._num_samples_yielded_wrapper[worker_idx]):
+                    num_samples_yielded[dataset_idx] += samples_yielded
 
         elif isinstance(self.dataset, ParallelStreamingDataset):
-            num_samples_yieled, _ = self.dataset.get_num_samples_yielded(
+            num_samples_yielded, _ = self.dataset.get_num_samples_yielded(
                 self._num_samples_yielded_wrapper, self._num_cycles
             )
 
@@ -737,7 +737,7 @@ class StreamingDataLoader(DataLoader):
 
         assert self.batch_size
         return {
-            "dataset": self.dataset.state_dict(self.num_workers, self.batch_size, num_samples_yieled),
+            "dataset": self.dataset.state_dict(self.num_workers, self.batch_size, num_samples_yielded),
             "current_epoch": self.current_epoch,
             "latest_worker_idx": self._latest_worker_idx,
             "num_samples_yielded": deepcopy(self._num_samples_yielded_wrapper),
