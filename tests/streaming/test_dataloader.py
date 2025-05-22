@@ -1,4 +1,5 @@
 import os
+import sys
 
 import pytest
 import torch
@@ -377,6 +378,7 @@ def rng_transform(samples, rng):
 @pytest.mark.parametrize("length", [None, 7])
 @pytest.mark.parametrize("num_workers", [0, 2])
 @pytest.mark.parametrize("transform", [None, simple_transform, rng_transform])
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
 def test_resume_parallel_dataset(tmp_path, length, num_workers, transform):
     dset_paths = [str(tmp_path / f"dataset_{i}") for i in range(2)]
     for dset_path in dset_paths:

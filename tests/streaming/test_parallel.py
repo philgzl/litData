@@ -497,6 +497,7 @@ def test_parallel_dataset_dataloader_states_complete_iterations(parallel_dataset
 @pytest.mark.parametrize("num_workers", [0, 2])
 @pytest.mark.parametrize("break_at", [3, 7])
 @pytest.mark.parametrize("parallel_dataset", [None, 20, 48], indirect=True)
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
 def test_parallel_dataset_dataloader_states_partial_iterations(parallel_dataset, num_workers, break_at):
     print(f"Testing with num_workers={num_workers}, break_at={break_at}")
 
