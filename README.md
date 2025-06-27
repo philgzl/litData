@@ -1317,6 +1317,8 @@ data_dir = "s3://my-bucket/my_optimized_dataset"
 dataset = StreamingDataset(input_dir=Dir(path=cache_dir, url=data_dir))
 ```
 
+The default cache directory can also be set via the `LITDATA_CACHE_DIR` environment variable.
+
 </details>
 
 <details>
