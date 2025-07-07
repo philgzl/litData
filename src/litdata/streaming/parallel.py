@@ -104,7 +104,7 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
             seed: Seed for the random number generators provided to ``transform``.
             resume: If ``True`` and ``length`` is not ``None``, tells the dataloader to resume the dataset from where it
                 left off in the previous epoch. If ``False``, the same ``length`` samples are yielded in each epoch.
-                Ignored if ``length`` is ``None`` or if the dataset is used without a ``StreamingDataLoader``.
+                Ignored if ``length`` is ``None``.
             reset_rngs: If ``True``, the random number generators provided to ``transform`` are reset to their initial
                 state at the beginning of each epoch. Together with ``resume=False``, this allows to produce the same
                 samples in each epoch.
@@ -300,6 +300,13 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
             )
             for dataset_idx, dataset in enumerate(self._datasets)
         }
+
+    def reset_state_dict(self) -> None:
+        """Reset the state of the dataset."""
+        super().reset_state_dict()
+        if self.is_cycling() and not self.resume:
+            for dataset in self._datasets:
+                dataset.set_epoch(0)
 
 
 class _ParallelDatasetIterator(Iterator):

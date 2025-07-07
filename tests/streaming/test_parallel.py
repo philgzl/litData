@@ -870,3 +870,42 @@ def test_parallel_dataset_partial_iteration_resume(tmp_path_factory, length, res
             assert all(torch.equal(x, y) for x, y in zip(batch, batches_1[i]))
         if i == break_at:
             break
+
+
+@pytest.mark.parametrize("length", [None, 6])
+@pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize("shuffle", [False, True])
+def test_parallel_dataset_complete_iteration_resume(tmp_path_factory, length, resume, shuffle):
+    _, _, pardset, dloader = prepare_parallel_dataset_and_dataloder(
+        tmp_path_factory, parlen=length, len1=4, len2=4, batch_size=1, num_workers=2, shuffle=shuffle, resume=resume
+    )
+    assert pardset.is_cycling() or length is None
+    expected_1 = [
+        [torch.tensor([0]), torch.tensor([0])],
+        [torch.tensor([2]), torch.tensor([2])],
+        [torch.tensor([1]), torch.tensor([1])],
+        [torch.tensor([3]), torch.tensor([3])],
+        [torch.tensor([0]), torch.tensor([0])],
+        [torch.tensor([2]), torch.tensor([2])],
+    ]
+    batches_1 = []
+    for i, batch in enumerate(dloader):
+        if not shuffle:
+            assert all(torch.equal(x, y) for x, y in zip(batch, expected_1[i]))
+        batches_1.append(batch)
+    expected_2 = [
+        [torch.tensor([1]), torch.tensor([1])],
+        [torch.tensor([3]), torch.tensor([3])],
+        [torch.tensor([0]), torch.tensor([0])],
+        [torch.tensor([2]), torch.tensor([2])],
+        [torch.tensor([1]), torch.tensor([1])],
+        [torch.tensor([3]), torch.tensor([3])],
+    ]
+    for i, batch in enumerate(dloader):
+        if not shuffle:
+            assert all(
+                torch.equal(x, y)
+                for x, y in zip(batch, (expected_2 if resume and length is not None else expected_1)[i])
+            )
+        elif not resume and length is not None:
+            assert all(torch.equal(x, y) for x, y in zip(batch, batches_1[i]))
