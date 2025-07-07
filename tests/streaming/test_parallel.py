@@ -1,6 +1,7 @@
 import functools
 import sys
 from copy import deepcopy
+from dataclasses import dataclass
 from unittest.mock import ANY, MagicMock
 
 import pytest
@@ -562,6 +563,18 @@ def test_parallel_dataset_dataloader_states_partial_iterations(
     assert samples_yielded == len(parallel_dataset), "All samples should be yielded in the second epoch."
 
 
+@dataclass
+class ExpectedStates:
+    num_samples_yielded: list[dict[int, list[int]]]
+    num_cycles: list[dict[int, list[int]]]
+    latest_worker_idx: list[int]
+    current_epoch: list[int]
+    dset_1_current_epoch: list[int]
+    dset_2_current_epoch: list[int]
+    dset_1_samples_yielded: list[int]
+    dset_2_samples_yielded: list[int]
+
+
 TEST_MAPS = [
     {
         "length": None,
@@ -569,50 +582,54 @@ TEST_MAPS = [
         "len2": 14,
         "batch_size": 2,
         "num_workers": 3,
-        "epoch_1_expected_num_samples_yielded": [
-            {0: [2, 2]},
-            {0: [2, 2], 1: [2, 2]},
-            {0: [2, 2], 1: [2, 2], 2: [2, 2]},
-            {0: [4, 4], 1: [2, 2], 2: [2, 2]},
-            {0: [4, 4], 1: [4, 4], 2: [2, 2]},
-            {0: [4, 4], 1: [4, 4], 2: [4, 4]},
-        ],
-        "epoch_1_expected_num_cycles": [
-            {0: [0, 0]},
-            {0: [0, 0], 1: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-        ],
-        "epoch_1_expected_current_epoch": [1, 1, 1, 1, 1, 1],
-        "epoch_1_expected_dataset_1_current_epoch": [1, 1, 1, 1, 1, 1],
-        "epoch_1_expected_dataset_2_current_epoch": [1, 1, 1, 1, 1, 1],
-        "epoch_1_expected_latest_worker_idx": [0, 1, 2, 0, 1, 2],
-        "epoch_1_expected_dataset0_samples_yielded": [2, 4, 6, 8, 10, 12],
-        "epoch_1_expected_dataset1_samples_yielded": [2, 4, 6, 8, 10, 12],
-        "epoch_2_expected_num_samples_yielded": [
-            {0: [2, 2]},
-            {0: [2, 2], 1: [2, 2]},
-            {0: [2, 2], 1: [2, 2], 2: [2, 2]},
-            {0: [4, 4], 1: [2, 2], 2: [2, 2]},
-            {0: [4, 4], 1: [4, 4], 2: [2, 2]},
-            {0: [4, 4], 1: [4, 4], 2: [4, 4]},
-        ],
-        "epoch_2_expected_num_cycles": [
-            {0: [0, 0]},
-            {0: [0, 0], 1: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-        ],
-        "epoch_2_expected_current_epoch": [2, 2, 2, 2, 2, 2],
-        "epoch_2_expected_dataset_1_current_epoch": [2, 2, 2, 2, 2, 2],
-        "epoch_2_expected_dataset_2_current_epoch": [2, 2, 2, 2, 2, 2],
-        "epoch_2_expected_latest_worker_idx": [0, 1, 2, 0, 1, 2],
-        "epoch_2_expected_dataset0_samples_yielded": [2, 4, 6, 8, 10, 12],
-        "epoch_2_expected_dataset1_samples_yielded": [2, 4, 6, 8, 10, 12],
+        "expected_states_1": ExpectedStates(
+            num_samples_yielded=[
+                {0: [2, 2]},
+                {0: [2, 2], 1: [2, 2]},
+                {0: [2, 2], 1: [2, 2], 2: [2, 2]},
+                {0: [4, 4], 1: [2, 2], 2: [2, 2]},
+                {0: [4, 4], 1: [4, 4], 2: [2, 2]},
+                {0: [4, 4], 1: [4, 4], 2: [4, 4]},
+            ],
+            num_cycles=[
+                {0: [0, 0]},
+                {0: [0, 0], 1: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+            ],
+            latest_worker_idx=[0, 1, 2, 0, 1, 2],
+            current_epoch=[1, 1, 1, 1, 1, 1],
+            dset_1_current_epoch=[1, 1, 1, 1, 1, 1],
+            dset_2_current_epoch=[1, 1, 1, 1, 1, 1],
+            dset_1_samples_yielded=[2, 4, 6, 8, 10, 12],
+            dset_2_samples_yielded=[2, 4, 6, 8, 10, 12],
+        ),
+        "expected_states_2": ExpectedStates(
+            num_samples_yielded=[
+                {0: [2, 2]},
+                {0: [2, 2], 1: [2, 2]},
+                {0: [2, 2], 1: [2, 2], 2: [2, 2]},
+                {0: [4, 4], 1: [2, 2], 2: [2, 2]},
+                {0: [4, 4], 1: [4, 4], 2: [2, 2]},
+                {0: [4, 4], 1: [4, 4], 2: [4, 4]},
+            ],
+            num_cycles=[
+                {0: [0, 0]},
+                {0: [0, 0], 1: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+            ],
+            latest_worker_idx=[0, 1, 2, 0, 1, 2],
+            current_epoch=[2, 2, 2, 2, 2, 2],
+            dset_1_current_epoch=[2, 2, 2, 2, 2, 2],
+            dset_2_current_epoch=[2, 2, 2, 2, 2, 2],
+            dset_1_samples_yielded=[2, 4, 6, 8, 10, 12],
+            dset_2_samples_yielded=[2, 4, 6, 8, 10, 12],
+        ),
     },
     {
         "length": 12,
@@ -620,50 +637,54 @@ TEST_MAPS = [
         "len2": 20,
         "batch_size": 2,
         "num_workers": 3,
-        "epoch_1_expected_num_samples_yielded": [
-            {0: [2, 2]},
-            {0: [2, 2], 1: [2, 2]},
-            {0: [2, 2], 1: [2, 2], 2: [2, 2]},
-            {0: [4, 4], 1: [2, 2], 2: [2, 2]},
-            {0: [4, 4], 1: [4, 4], 2: [2, 2]},
-            {0: [4, 4], 1: [4, 4], 2: [4, 4]},
-        ],
-        "epoch_1_expected_num_cycles": [
-            {0: [0, 0]},
-            {0: [0, 0], 1: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-        ],
-        "epoch_1_expected_current_epoch": [1, 1, 1, 1, 1, 1],
-        "epoch_1_expected_dataset_1_current_epoch": [1, 1, 1, 1, 1, 1],
-        "epoch_1_expected_dataset_2_current_epoch": [1, 1, 1, 1, 1, 1],
-        "epoch_1_expected_latest_worker_idx": [0, 1, 2, 0, 1, 2],
-        "epoch_1_expected_dataset0_samples_yielded": [2, 4, 6, 8, 10, 12],
-        "epoch_1_expected_dataset1_samples_yielded": [2, 4, 6, 8, 10, 12],
-        "epoch_2_expected_num_samples_yielded": [
-            {0: [6, 6], 1: [4, 4], 2: [4, 4]},
-            {0: [6, 6], 1: [6, 6], 2: [4, 4]},
-            {0: [6, 6], 1: [6, 6], 2: [6, 6]},
-            {0: [2, 8], 1: [6, 6], 2: [6, 6]},
-            {0: [2, 8], 1: [2, 2], 2: [6, 6]},
-            {0: [2, 8], 1: [2, 2], 2: [2, 2]},
-        ],
-        "epoch_2_expected_num_cycles": [
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [0, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [1, 0], 1: [0, 0], 2: [0, 0]},
-            {0: [1, 0], 1: [1, 1], 2: [0, 0]},
-            {0: [1, 0], 1: [1, 1], 2: [1, 1]},
-        ],
-        "epoch_2_expected_current_epoch": [2, 2, 2, 2, 2, 2],
-        "epoch_2_expected_dataset_1_current_epoch": [1, 1, 1, 2, 2, 2],
-        "epoch_2_expected_dataset_2_current_epoch": [1, 1, 1, 1, 2, 2],
-        "epoch_2_expected_latest_worker_idx": [0, 1, 2, 0, 1, 2],
-        "epoch_2_expected_dataset0_samples_yielded": [14, 16, 18, 2, 4, 6],
-        "epoch_2_expected_dataset1_samples_yielded": [14, 16, 18, 20, 2, 4],
+        "expected_states_1": ExpectedStates(
+            num_samples_yielded=[
+                {0: [2, 2]},
+                {0: [2, 2], 1: [2, 2]},
+                {0: [2, 2], 1: [2, 2], 2: [2, 2]},
+                {0: [4, 4], 1: [2, 2], 2: [2, 2]},
+                {0: [4, 4], 1: [4, 4], 2: [2, 2]},
+                {0: [4, 4], 1: [4, 4], 2: [4, 4]},
+            ],
+            num_cycles=[
+                {0: [0, 0]},
+                {0: [0, 0], 1: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+            ],
+            latest_worker_idx=[0, 1, 2, 0, 1, 2],
+            current_epoch=[1, 1, 1, 1, 1, 1],
+            dset_1_current_epoch=[1, 1, 1, 1, 1, 1],
+            dset_2_current_epoch=[1, 1, 1, 1, 1, 1],
+            dset_1_samples_yielded=[2, 4, 6, 8, 10, 12],
+            dset_2_samples_yielded=[2, 4, 6, 8, 10, 12],
+        ),
+        "expected_states_2": ExpectedStates(
+            num_samples_yielded=[
+                {0: [6, 6], 1: [4, 4], 2: [4, 4]},
+                {0: [6, 6], 1: [6, 6], 2: [4, 4]},
+                {0: [6, 6], 1: [6, 6], 2: [6, 6]},
+                {0: [2, 8], 1: [6, 6], 2: [6, 6]},
+                {0: [2, 8], 1: [2, 2], 2: [6, 6]},
+                {0: [2, 8], 1: [2, 2], 2: [2, 2]},
+            ],
+            num_cycles=[
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [0, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [1, 0], 1: [0, 0], 2: [0, 0]},
+                {0: [1, 0], 1: [1, 1], 2: [0, 0]},
+                {0: [1, 0], 1: [1, 1], 2: [1, 1]},
+            ],
+            latest_worker_idx=[0, 1, 2, 0, 1, 2],
+            current_epoch=[2, 2, 2, 2, 2, 2],
+            dset_1_current_epoch=[1, 1, 1, 2, 2, 2],
+            dset_2_current_epoch=[1, 1, 1, 1, 2, 2],
+            dset_1_samples_yielded=[14, 16, 18, 2, 4, 6],
+            dset_2_samples_yielded=[14, 16, 18, 20, 2, 4],
+        ),
     },
 ]
 
@@ -677,22 +698,8 @@ def test_parallel_dataset_with_dataloader_2_epochs(
     len2,
     batch_size,
     num_workers,
-    epoch_1_expected_num_samples_yielded,
-    epoch_1_expected_num_cycles,
-    epoch_1_expected_current_epoch,
-    epoch_1_expected_dataset_1_current_epoch,
-    epoch_1_expected_dataset_2_current_epoch,
-    epoch_1_expected_latest_worker_idx,
-    epoch_1_expected_dataset0_samples_yielded,
-    epoch_1_expected_dataset1_samples_yielded,
-    epoch_2_expected_num_samples_yielded,
-    epoch_2_expected_num_cycles,
-    epoch_2_expected_current_epoch,
-    epoch_2_expected_dataset_1_current_epoch,
-    epoch_2_expected_dataset_2_current_epoch,
-    epoch_2_expected_latest_worker_idx,
-    epoch_2_expected_dataset0_samples_yielded,
-    epoch_2_expected_dataset1_samples_yielded,
+    expected_states_1: ExpectedStates,
+    expected_states_2: ExpectedStates,
 ):
     dataset1, dataset2, _, dataloader = prepare_parallel_dataset_and_dataloder(
         tmp_path_factory,
@@ -706,7 +713,7 @@ def test_parallel_dataset_with_dataloader_2_epochs(
     assert dataset1.current_epoch == 1
     assert dataset2.current_epoch == 1
 
-    expected_dataset_state = {
+    expected_dset_state = {
         "dataset": {
             "0": {
                 "num_samples_yielded": 0,
@@ -753,16 +760,16 @@ def test_parallel_dataset_with_dataloader_2_epochs(
         batches_1.append(batch)
         curr_state_dict = dataloader.state_dict()
 
-        expected_dataset_state["num_samples_yielded"] = epoch_1_expected_num_samples_yielded[idx]
-        expected_dataset_state["num_cycles"] = epoch_1_expected_num_cycles[idx]
-        expected_dataset_state["current_epoch"] = epoch_1_expected_current_epoch[idx]
-        expected_dataset_state["latest_worker_idx"] = epoch_1_expected_latest_worker_idx[idx]
-        expected_dataset_state["dataset"]["0"]["num_samples_yielded"] = epoch_1_expected_dataset0_samples_yielded[idx]
-        expected_dataset_state["dataset"]["1"]["num_samples_yielded"] = epoch_1_expected_dataset1_samples_yielded[idx]
-        expected_dataset_state["dataset"]["0"]["current_epoch"] = epoch_1_expected_dataset_1_current_epoch[idx]
-        expected_dataset_state["dataset"]["1"]["current_epoch"] = epoch_1_expected_dataset_2_current_epoch[idx]
+        expected_dset_state["num_samples_yielded"] = expected_states_1.num_samples_yielded[idx]
+        expected_dset_state["num_cycles"] = expected_states_1.num_cycles[idx]
+        expected_dset_state["latest_worker_idx"] = expected_states_1.latest_worker_idx[idx]
+        expected_dset_state["current_epoch"] = expected_states_1.current_epoch[idx]
+        expected_dset_state["dataset"]["0"]["current_epoch"] = expected_states_1.dset_1_current_epoch[idx]
+        expected_dset_state["dataset"]["1"]["current_epoch"] = expected_states_1.dset_2_current_epoch[idx]
+        expected_dset_state["dataset"]["0"]["num_samples_yielded"] = expected_states_1.dset_1_samples_yielded[idx]
+        expected_dset_state["dataset"]["1"]["num_samples_yielded"] = expected_states_1.dset_2_samples_yielded[idx]
 
-        assert curr_state_dict == expected_dataset_state
+        assert curr_state_dict == expected_dset_state
 
     assert dataset1.current_epoch == 1
     assert dataset2.current_epoch == 1
@@ -776,16 +783,16 @@ def test_parallel_dataset_with_dataloader_2_epochs(
         batches_2.append(batch)
         curr_state_dict = dataloader.state_dict()
 
-        expected_dataset_state["num_samples_yielded"] = epoch_2_expected_num_samples_yielded[idx]
-        expected_dataset_state["num_cycles"] = epoch_2_expected_num_cycles[idx]
-        expected_dataset_state["current_epoch"] = epoch_2_expected_current_epoch[idx]
-        expected_dataset_state["latest_worker_idx"] = epoch_2_expected_latest_worker_idx[idx]
-        expected_dataset_state["dataset"]["0"]["num_samples_yielded"] = epoch_2_expected_dataset0_samples_yielded[idx]
-        expected_dataset_state["dataset"]["1"]["num_samples_yielded"] = epoch_2_expected_dataset1_samples_yielded[idx]
-        expected_dataset_state["dataset"]["0"]["current_epoch"] = epoch_2_expected_dataset_1_current_epoch[idx]
-        expected_dataset_state["dataset"]["1"]["current_epoch"] = epoch_2_expected_dataset_2_current_epoch[idx]
+        expected_dset_state["num_samples_yielded"] = expected_states_2.num_samples_yielded[idx]
+        expected_dset_state["num_cycles"] = expected_states_2.num_cycles[idx]
+        expected_dset_state["latest_worker_idx"] = expected_states_2.latest_worker_idx[idx]
+        expected_dset_state["current_epoch"] = expected_states_2.current_epoch[idx]
+        expected_dset_state["dataset"]["0"]["current_epoch"] = expected_states_2.dset_1_current_epoch[idx]
+        expected_dset_state["dataset"]["1"]["current_epoch"] = expected_states_2.dset_2_current_epoch[idx]
+        expected_dset_state["dataset"]["0"]["num_samples_yielded"] = expected_states_2.dset_1_samples_yielded[idx]
+        expected_dset_state["dataset"]["1"]["num_samples_yielded"] = expected_states_2.dset_2_samples_yielded[idx]
 
-        assert curr_state_dict == expected_dataset_state
+        assert curr_state_dict == expected_dset_state
 
         if idx == save_at:
             saved_dataloader_state_dict = deepcopy(curr_state_dict)
@@ -808,16 +815,16 @@ def test_parallel_dataset_with_dataloader_2_epochs(
         curr_state_dict = dataloader.state_dict()
 
         idx = idx + save_at + 1
-        expected_dataset_state["num_samples_yielded"] = epoch_2_expected_num_samples_yielded[idx]
-        expected_dataset_state["num_cycles"] = epoch_2_expected_num_cycles[idx]
-        expected_dataset_state["current_epoch"] = epoch_2_expected_current_epoch[idx]
-        expected_dataset_state["latest_worker_idx"] = epoch_2_expected_latest_worker_idx[idx]
-        expected_dataset_state["dataset"]["0"]["num_samples_yielded"] = epoch_2_expected_dataset0_samples_yielded[idx]
-        expected_dataset_state["dataset"]["1"]["num_samples_yielded"] = epoch_2_expected_dataset1_samples_yielded[idx]
-        expected_dataset_state["dataset"]["0"]["current_epoch"] = epoch_2_expected_dataset_1_current_epoch[idx]
-        expected_dataset_state["dataset"]["1"]["current_epoch"] = epoch_2_expected_dataset_2_current_epoch[idx]
+        expected_dset_state["num_samples_yielded"] = expected_states_2.num_samples_yielded[idx]
+        expected_dset_state["num_cycles"] = expected_states_2.num_cycles[idx]
+        expected_dset_state["latest_worker_idx"] = expected_states_2.latest_worker_idx[idx]
+        expected_dset_state["current_epoch"] = expected_states_2.current_epoch[idx]
+        expected_dset_state["dataset"]["0"]["current_epoch"] = expected_states_2.dset_1_current_epoch[idx]
+        expected_dset_state["dataset"]["1"]["current_epoch"] = expected_states_2.dset_2_current_epoch[idx]
+        expected_dset_state["dataset"]["0"]["num_samples_yielded"] = expected_states_2.dset_1_samples_yielded[idx]
+        expected_dset_state["dataset"]["1"]["num_samples_yielded"] = expected_states_2.dset_2_samples_yielded[idx]
 
-        assert curr_state_dict == expected_dataset_state
+        assert curr_state_dict == expected_dset_state
 
     assert len(batches_2[save_at + 1 :]) == len(batches_23)
     assert all(torch.equal(x1, x2) for b1, b2 in zip(batches_2[save_at + 1 :], batches_23) for x1, x2 in zip(b1, b2))
