@@ -835,6 +835,7 @@ def test_parallel_dataset_with_dataloader_2_epochs(
 @pytest.mark.parametrize("length", [None, 16, float("inf")])
 @pytest.mark.parametrize("resume", [False, True])
 @pytest.mark.parametrize("shuffle", [False, True])
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
 def test_parallel_dataset_partial_iteration_resume(tmp_path_factory, length, resume, shuffle):
     _, _, pardset, dloader = prepare_parallel_dataset_and_dataloder(
         tmp_path_factory, parlen=length, len1=10, len2=10, batch_size=1, num_workers=2, shuffle=shuffle, resume=resume
@@ -875,6 +876,7 @@ def test_parallel_dataset_partial_iteration_resume(tmp_path_factory, length, res
 @pytest.mark.parametrize("length", [None, 6])
 @pytest.mark.parametrize("resume", [False, True])
 @pytest.mark.parametrize("shuffle", [False, True])
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
 def test_parallel_dataset_complete_iteration_resume(tmp_path_factory, length, resume, shuffle):
     _, _, pardset, dloader = prepare_parallel_dataset_and_dataloder(
         tmp_path_factory, parlen=length, len1=4, len2=4, batch_size=1, num_workers=2, shuffle=shuffle, resume=resume
@@ -909,3 +911,64 @@ def test_parallel_dataset_complete_iteration_resume(tmp_path_factory, length, re
             )
         elif not resume and length is not None:
             assert all(torch.equal(x, y) for x, y in zip(batch, batches_1[i]))
+
+
+@pytest.mark.parametrize("length", [None, 18])
+@pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize("shuffle", [False, True])
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
+def test_parallel_dataset_partial_iteration_resume_without_dataloader(tmp_path_factory, length, resume, shuffle):
+    _, _, pardset, _ = prepare_parallel_dataset_and_dataloder(
+        tmp_path_factory, parlen=length, len1=10, len2=10, batch_size=1, num_workers=2, shuffle=shuffle, resume=resume
+    )
+    assert pardset.is_cycling() or length is None
+    break_at = 3
+    expected = [
+        [0, 0],
+        [1, 1],
+        [2, 2],
+        [3, 3],
+    ]
+    samples = []
+    for i, sample in enumerate(pardset):
+        if not shuffle:
+            assert all(x == y for x, y in zip(sample, expected[i]))
+        samples.append(sample)
+        if i == break_at:
+            break
+    for i, sample in enumerate(pardset):
+        if not shuffle:
+            assert all(x == y for x, y in zip(sample, expected[i]))
+        elif not resume and length is not None:
+            assert all(x == y for x, y in zip(sample, samples[i]))
+        if i == break_at:
+            break
+
+
+@pytest.mark.parametrize("length", [None, 6])
+@pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize("shuffle", [False, True])
+@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="too slow in CI")
+def test_parallel_dataset_complete_iteration_resume_without_dataloader(tmp_path_factory, length, resume, shuffle):
+    _, _, pardset, _ = prepare_parallel_dataset_and_dataloder(
+        tmp_path_factory, parlen=length, len1=4, len2=4, batch_size=1, num_workers=2, shuffle=shuffle, resume=resume
+    )
+    assert pardset.is_cycling() or length is None
+    expected = [
+        [0, 0],
+        [1, 1],
+        [2, 2],
+        [3, 3],
+        [0, 0],
+        [1, 1],
+    ]
+    samples = []
+    for i, sample in enumerate(pardset):
+        if not shuffle:
+            assert all(x == y for x, y in zip(sample, expected[i]))
+        samples.append(sample)
+    for i, sample in enumerate(pardset):
+        if not shuffle:
+            assert all(x == y for x, y in zip(sample, expected[i]))
+        elif not resume and length is not None:
+            assert all(x == y for x, y in zip(sample, samples[i]))

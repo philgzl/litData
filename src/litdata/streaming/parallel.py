@@ -160,7 +160,7 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
 
     def set_epoch(self, current_epoch: int) -> None:
         self._current_epoch = current_epoch
-        if self.is_cycling():
+        if self.is_cycling() and self.resume:
             # do not set the epoch as cycling datasets have their own epoch counter
             return
         for dataset in self._datasets:
@@ -194,6 +194,9 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
         return [self._get_len(d) for d in self._datasets]
 
     def __iter__(self) -> Iterator[Any]:
+        if self.is_cycling() and not self.resume:
+            self.set_epoch(1)
+
         worker_env = _WorkerEnv.detect()
 
         num_samples_yielded = None
@@ -300,13 +303,6 @@ class ParallelStreamingDataset(_BaseStreamingDatasetWrapper):
             )
             for dataset_idx, dataset in enumerate(self._datasets)
         }
-
-    def reset_state_dict(self) -> None:
-        """Reset the state of the dataset."""
-        super().reset_state_dict()
-        if self.is_cycling() and not self.resume:
-            for dataset in self._datasets:
-                dataset.set_epoch(0)
 
 
 class _ParallelDatasetIterator(Iterator):
