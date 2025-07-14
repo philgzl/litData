@@ -411,6 +411,7 @@ def optimize(
     optimize_dns: Optional[bool] = None,
     storage_options: dict[str, Any] = {},
     keep_data_ordered: bool = True,
+    verbose: bool = True,
 ) -> None:
     """This function converts a dataset into chunks, possibly in a distributed way.
 
@@ -454,6 +455,7 @@ def optimize(
             workload and reduce idle time when some workers finish early. This may lead to unordered
             processing of items. If True, each worker processes a statically assigned subset of items
             in order.
+        verbose: Whether to print the progress of the optimization. Defaults to True.
     """
     _check_version_and_prompt_upgrade(__version__)
 
@@ -492,7 +494,7 @@ def optimize(
             "Only https://lightning.ai/ supports multiple nodes or selecting a machine.Create an account to try it out."
         )
 
-    if not _IS_IN_STUDIO:
+    if not _IS_IN_STUDIO and verbose:
         print(
             "Create an account on https://lightning.ai/ to optimize your data faster "
             "using multiple nodes and large machines."
@@ -564,6 +566,7 @@ def optimize(
             start_method=start_method,
             storage_options=storage_options,
             keep_data_ordered=keep_data_ordered,
+            verbose=verbose,
         )
 
         with optimize_dns_context(optimize_dns if optimize_dns is not None else False):
