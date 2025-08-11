@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from litdata import StreamingRawDataset
-from litdata.raw.indexer import FileIndexer, FileMetadata
+from litdata.raw.indexer import _INDEX_FILENAME, FileIndexer, FileMetadata
 
 
 def test_file_metadata():
@@ -180,3 +180,134 @@ def test_streaming_raw_dataset_with_custom_indexer(tmp_path):
     dataset = StreamingRawDataset(input_dir=str(tmp_path), indexer=custom_indexer, cache_files=False)
 
     assert len(dataset) == 1  # Only .jpg file should be indexed
+
+
+def test_build_or_load_index_unsupported_scheme(tmp_path):
+    """Test that build_or_load_index raises ValueError for unsupported schemes."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    indexer = FileIndexer()
+    with pytest.raises(ValueError, match="Unsupported input directory scheme: `ftp`"):
+        indexer.build_or_load_index("ftp://unsupported/path", str(cache_dir), {})
+
+
+def test_discover_files_unsupported_scheme():
+    """Test that discover_files raises ValueError for unsupported schemes."""
+    indexer = FileIndexer()
+    with pytest.raises(ValueError, match="Unsupported input directory scheme: `http`"):
+        indexer.discover_files("http://unsupported/path", {})
+
+
+@patch("litdata.raw.indexer.BaseIndexer._upload_to_cloud")
+@patch("litdata.raw.indexer.BaseIndexer._download_from_cloud", side_effect=FileNotFoundError)
+@pytest.mark.skipif(condition=sys.platform == "win32", reason="Not supported on windows")
+def test_build_and_cache_remote_index(mock_download, mock_upload, tmp_path):
+    """Test that a new index is built, cached locally, and uploaded to remote."""
+    input_dir = "s3://my-bucket/data"
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    indexer = FileIndexer()
+    dummy_files = [FileMetadata("s3://my-bucket/data/file1.txt", 100)]
+
+    with patch.object(indexer, "discover_files", return_value=dummy_files) as mock_discover:
+        files = indexer.build_or_load_index(input_dir, str(cache_dir), {})
+
+        assert files == dummy_files
+        mock_discover.assert_called_once_with(input_dir, {})
+
+        # Check local cache
+        local_index_path = cache_dir / _INDEX_FILENAME
+        assert local_index_path.exists()
+
+        # Check remote upload
+        remote_index_path = f"{input_dir.rstrip('/')}/{_INDEX_FILENAME}"
+        mock_download.assert_called_once_with(remote_index_path, str(local_index_path), {})
+        mock_upload.assert_called_once_with(str(local_index_path), remote_index_path, {})
+
+
+@patch("litdata.raw.indexer.BaseIndexer._upload_to_cloud")
+@patch("litdata.raw.indexer.BaseIndexer._download_from_cloud")
+@pytest.mark.skipif(condition=sys.platform == "win32", reason="Not supported on windows")
+def test_load_remote_index_from_cache(mock_download, mock_upload, tmp_path):
+    """Test loading an index from remote cache when local is empty."""
+    input_dir = "s3://my-bucket/data"
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    local_index_path = cache_dir / _INDEX_FILENAME
+
+    indexer = FileIndexer()
+    dummy_files = [FileMetadata("s3://my-bucket/data/file1.txt", 100)]
+
+    # Simulate successful download by having the mock create the local file
+    def fake_download(remote_path, local_path, storage_options):
+        import json
+
+        import zstd
+
+        metadata = {
+            "source": input_dir,
+            "files": [f.to_dict() for f in dummy_files],
+            "created_at": 0,
+        }
+        with open(local_path, "wb") as f:
+            f.write(zstd.compress(json.dumps(metadata).encode("utf-8")))
+
+    mock_download.side_effect = fake_download
+
+    with patch.object(indexer, "discover_files") as mock_discover:
+        files = indexer.build_or_load_index(input_dir, str(cache_dir), {})
+
+        assert files == dummy_files
+        mock_discover.assert_not_called()
+        remote_index_path = f"{input_dir.rstrip('/')}/{_INDEX_FILENAME}"
+        mock_download.assert_called_once_with(remote_index_path, str(local_index_path), {})
+        mock_upload.assert_not_called()
+
+
+@patch("litdata.raw.indexer.BaseIndexer._upload_to_cloud")
+@patch("litdata.raw.indexer.BaseIndexer._download_from_cloud")
+@pytest.mark.skipif(condition=sys.platform == "win32", reason="Not supported on windows")
+def test_recompute_index_flag_with_cache(mock_download, mock_upload, tmp_path):
+    """Test that `recompute_index=True` forces a rebuild even if a cache exists."""
+    input_dir = "s3://my-bucket/data"
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    local_index_path = cache_dir / _INDEX_FILENAME
+
+    # Create a dummy local cache to ensure it's ignored
+    with open(local_index_path, "w") as f:
+        f.write("old_index_data")
+
+    indexer = FileIndexer()
+    new_dummy_files = [FileMetadata("s3://my-bucket/data/new_file.txt", 200)]
+
+    with patch.object(indexer, "discover_files", return_value=new_dummy_files) as mock_discover:
+        files = indexer.build_or_load_index(input_dir, str(cache_dir), {}, recompute_index=True)
+
+        assert files == new_dummy_files
+        mock_discover.assert_called_once_with(input_dir, {})
+        mock_download.assert_not_called()  # Should not attempt to load from cache
+        mock_upload.assert_called_once()
+
+
+@pytest.mark.skipif(condition=sys.platform == "win32", reason="Not supported on windows")
+def test_recompute_index_excludes_index_file(tmp_path):
+    """Test that recomputing the index does not include the index file itself if it exists."""
+    # Create test files
+    (tmp_path / "file1.jpg").write_text("content1")
+    (tmp_path / "file2.jpg").write_text("content2")
+    # Create a dummy index file that should be ignored
+    (tmp_path / _INDEX_FILENAME).write_text("dummy index content")
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    # Include .zstd to ensure we are not just filtering by extension
+    indexer = FileIndexer(extensions=[".jpg", ".zstd"])
+    files = indexer.build_or_load_index(str(tmp_path), str(cache_dir), {}, recompute_index=True)
+
+    assert len(files) == 2
+    for f in files:
+        assert _INDEX_FILENAME not in f.path
