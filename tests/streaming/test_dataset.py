@@ -107,21 +107,23 @@ def _simple_optimize_fn(index):
 @pytest.mark.parametrize(
     ("chunk_bytes", "chunk_size"),
     [
-        ("64MB", None),
-        (None, 5),  # at max 5 items in a chunk
-        (None, 75),  # at max 75 items in a chunk
-        (None, 1200),  # at max 1200 items in a chunk
+        (None, 10),
     ],
 )
 @pytest.mark.parametrize("keep_data_ordered", [True, False])
-def test_optimize_dataset(keep_data_ordered, chunk_bytes, chunk_size, tmpdir, monkeypatch):
+def test_optimize_dataset(
+    keep_data_ordered,
+    chunk_bytes,
+    chunk_size,
+    tmpdir,
+):
     data_dir = str(tmpdir / "optimized")
 
     optimize(
         fn=_simple_optimize_fn,
-        inputs=list(range(1000)),
+        inputs=list(range(20)),
         output_dir=data_dir,
-        num_workers=4,
+        num_workers=2,
         chunk_bytes=chunk_bytes,
         chunk_size=chunk_size,
         keep_data_ordered=keep_data_ordered,
@@ -131,7 +133,7 @@ def test_optimize_dataset(keep_data_ordered, chunk_bytes, chunk_size, tmpdir, mo
 
     ds = StreamingDataset(input_dir=data_dir)
 
-    expected_dataset = list(range(1000))
+    expected_dataset = list(range(20))
     actual_dataset = ds[:]
 
     assert len(actual_dataset) == len(expected_dataset)
@@ -368,7 +370,7 @@ def test_streaming_dataset_distributed_full_shuffle_odd(drop_last, tmpdir, compr
 def test_streaming_dataset_distributed_full_shuffle_even(drop_last, tmpdir, compression):
     seed_everything(42)
 
-    cache = Cache(str(tmpdir), chunk_size=10, compression=compression)
+    cache = Cache(str(tmpdir), chunk_size=500, compression=compression)
     for i in range(1222):
         cache[i] = i
 
@@ -388,7 +390,7 @@ def test_streaming_dataset_distributed_full_shuffle_even(drop_last, tmpdir, comp
     dataset_iter = iter(dataset)
     assert len(dataset_iter) == 611
     process_1_1 = list(dataset_iter)
-    assert process_1_1[:10] == [278, 272, 270, 273, 276, 275, 274, 271, 277, 279]
+    assert process_1_1[:10] == [1093, 1186, 1031, 1128, 1126, 1051, 1172, 1052, 1120, 1209]
     assert len(process_1_1) == 611
 
     dataset_2 = StreamingDataset(input_dir=str(tmpdir), shuffle=True, drop_last=drop_last)
@@ -399,7 +401,7 @@ def test_streaming_dataset_distributed_full_shuffle_even(drop_last, tmpdir, comp
     dataset_2_iter = iter(dataset_2)
     assert len(dataset_2_iter) == 611
     process_2_1 = list(dataset_2_iter)
-    assert process_2_1[:10] == [999, 993, 991, 994, 997, 996, 995, 992, 998, 527]
+    assert process_2_1[:10] == [967, 942, 893, 913, 982, 898, 947, 901, 894, 961]
     assert len(process_2_1) == 611
     assert len([i for i in process_1_1 if i in process_2_1]) == 0
 

@@ -45,7 +45,7 @@ from litdata.constants import (
     _TQDM_AVAILABLE,
 )
 from litdata.processing.readers import BaseReader, StreamingDataLoaderReader
-from litdata.processing.utilities import _create_dataset, remove_uuid_from_filename
+from litdata.processing.utilities import _create_dataset, construct_storage_options, remove_uuid_from_filename
 from litdata.streaming import Cache
 from litdata.streaming.cache import Dir
 from litdata.streaming.dataloader import StreamingDataLoader
@@ -168,7 +168,8 @@ def _download_data_target(
                     dirpath = os.path.dirname(local_path)
                     os.makedirs(dirpath, exist_ok=True)
                     if fs_provider is None:
-                        fs_provider = _get_fs_provider(input_dir.url, storage_options)
+                        merged_storage_options = construct_storage_options(storage_options, input_dir)
+                        fs_provider = _get_fs_provider(input_dir.url, merged_storage_options)
                     fs_provider.download_file(path, local_path)
 
                 elif os.path.isfile(path):
@@ -233,7 +234,8 @@ def _upload_fn(
     obj = parse.urlparse(output_dir.url if output_dir.url else output_dir.path)
 
     if obj.scheme in _SUPPORTED_PROVIDERS:
-        fs_provider = _get_fs_provider(output_dir.url, storage_options)
+        merged_storage_options = construct_storage_options(storage_options, output_dir)
+        fs_provider = _get_fs_provider(output_dir.url, merged_storage_options)
 
     while True:
         data: Optional[Union[str, tuple[str, str]]] = upload_queue.get()
@@ -1022,7 +1024,8 @@ class DataChunkRecipe(DataRecipe):
             local_filepath = os.path.join(cache_dir, _INDEX_FILENAME)
 
         if obj.scheme in _SUPPORTED_PROVIDERS:
-            fs_provider = _get_fs_provider(output_dir.url, self.storage_options)
+            merged_storage_options = construct_storage_options(self.storage_options, output_dir)
+            fs_provider = _get_fs_provider(output_dir.url, merged_storage_options)
             fs_provider.upload_file(
                 local_filepath,
                 os.path.join(output_dir.url, os.path.basename(local_filepath)),
@@ -1044,8 +1047,9 @@ class DataChunkRecipe(DataRecipe):
                 remote_filepath = os.path.join(output_dir_path, f"{node_rank}-{_INDEX_FILENAME}")
                 node_index_filepath = os.path.join(cache_dir, os.path.basename(remote_filepath))
                 if obj.scheme in _SUPPORTED_PROVIDERS:
-                    _wait_for_file_to_exist(remote_filepath, storage_options=self.storage_options)
-                    fs_provider = _get_fs_provider(remote_filepath, self.storage_options)
+                    merged_storage_options = construct_storage_options(self.storage_options, output_dir)
+                    _wait_for_file_to_exist(remote_filepath, storage_options=merged_storage_options)
+                    fs_provider = _get_fs_provider(remote_filepath, merged_storage_options)
                     fs_provider.download_file(remote_filepath, node_index_filepath)
                 elif output_dir.path and os.path.isdir(output_dir.path):
                     shutil.copyfile(remote_filepath, node_index_filepath)
@@ -1499,8 +1503,8 @@ class DataProcessor:
 
         prefix = self.output_dir.url.rstrip("/") + "/"
         checkpoint_prefix = os.path.join(prefix, ".checkpoints")
-
-        fs_provider = _get_fs_provider(self.output_dir.url, self.storage_options)
+        merged_storage_options = construct_storage_options(self.storage_options, self.output_dir)
+        fs_provider = _get_fs_provider(self.output_dir.url, merged_storage_options)
         fs_provider.delete_file_or_directory(checkpoint_prefix)
 
     def _save_current_config(self, workers_user_items: list[list[Any]]) -> None:
@@ -1529,8 +1533,8 @@ class DataProcessor:
 
             if obj.scheme not in _SUPPORTED_PROVIDERS:
                 not_supported_provider(self.output_dir.url)
-
-            fs_provider = _get_fs_provider(self.output_dir.url, self.storage_options)
+            merged_storage_options = construct_storage_options(self.storage_options, self.output_dir)
+            fs_provider = _get_fs_provider(self.output_dir.url, merged_storage_options)
 
             prefix = self.output_dir.url.rstrip("/") + "/" + ".checkpoints/"
 
@@ -1601,7 +1605,8 @@ class DataProcessor:
 
         # download all the checkpoint files in tempdir and read them
         with tempfile.TemporaryDirectory() as temp_dir:
-            fs_provider = _get_fs_provider(self.output_dir.url, self.storage_options)
+            merged_storage_options = construct_storage_options(self.storage_options, self.output_dir)
+            fs_provider = _get_fs_provider(self.output_dir.url, merged_storage_options)
             saved_file_dir = fs_provider.download_directory(prefix, temp_dir)
 
             if not os.path.exists(os.path.join(saved_file_dir, "config.json")):
