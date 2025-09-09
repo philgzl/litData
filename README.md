@@ -1619,6 +1619,55 @@ if __name__ == "__main__":
 
 </details>
 
+<details>
+  <summary> ✅ Lightning AI Data Connections - Direct download and upload </summary>
+
+&nbsp;
+
+[Lightning Studios](https://lightning.ai/) have special directories for data connections that are available to an entire teamspace. LitData functions that reference those directories will experience a significant performance increase as uploads and downloads will happen directly from the bucket that backs the folder.
+
+For example, output artifacts from this code will be directly uploaded to the `my-data-1` s3 bucket.
+
+```
+from litdata import optimize
+
+def should_keep(data):
+    if data % 2 == 0:
+        yield data
+
+if __name__ == "__main__":
+    optimize(
+        fn=should_keep,
+        inputs=list(range(1000)),
+        output_dir="/teamspace/s3_connections/my-data-1/output",
+        chunk_bytes="64MB",
+        num_workers=1
+    )
+```
+
+
+Similarly, data will be downloaded directly from the `my-data-1` s3 bucket in this example code.
+
+```
+from litdata import StreamingRawDataset
+
+if __name__ == "__main__":
+    data_dir = "/teamspace/s3_connections/my-bucket-1/data"
+
+    raw_dataset = StreamingRawDataset(data_dir)
+
+    data = list(raw_dataset)
+    print(data)
+```
+
+References to any of the following directories will work similarly:
+1. `/teamspace/lightning_storage/...`
+2. `/teamspace/s3_connections/...`
+3. `/teamspace/gcs_connections/...`
+4. `/teamspace/s3_folders/...`
+5. `/teamspace/gcs_folders/...`
+</details>
+
 &nbsp;
 
 
