@@ -21,7 +21,6 @@ from torch.utils.data import IterableDataset
 
 from litdata import __version__
 from litdata.constants import _INDEX_FILENAME
-from litdata.debugger import _get_log_msg
 from litdata.helpers import _check_version_and_prompt_upgrade
 from litdata.streaming import Cache
 from litdata.streaming.item_loader import BaseItemLoader, ParquetLoader
@@ -302,7 +301,6 @@ class StreamingDataset(IterableDataset):
 
     def __iter__(self) -> "StreamingDataset":
         # When the StreamingDataset is used within map or optimize, let's refetch the distributed env.
-        logger.debug(_get_log_msg({"name": "iterating_dataset", "ph": "B"}))
         if os.getenv("DATA_OPTIMIZER_GLOBAL_RANK"):
             self.distributed_env = _DistributedEnv.detect()
 
@@ -438,17 +436,7 @@ class StreamingDataset(IterableDataset):
             _my_indices = list(range(start, stop, step))
             _my_cache_indices = [ChunkedIndex(*self.cache._get_chunk_index_from_index(idx)) for idx in _my_indices]
             return [self.cache[chnk_idx] for chnk_idx in _my_cache_indices]
-        logger.debug(
-            _get_log_msg(
-                {"name": f"getitem_dataset_for_chunk_index_{index.chunk_index}_and_index_{index.index}", "ph": "B"}
-            )
-        )
         item = self.cache[index]
-        logger.debug(
-            _get_log_msg(
-                {"name": f"getitem_dataset_for_chunk_index_{index.chunk_index}_and_index_{index.index}", "ph": "E"}
-            )
-        )
         if hasattr(self, "transform"):
             if isinstance(self.transform, list):
                 for transform_fn in self.transform:
@@ -466,7 +454,6 @@ class StreamingDataset(IterableDataset):
             # if they are equal, means, worker has processed all the chunks
             self.current_epoch += 1
             self.reset_state_dict()
-            logger.debug(_get_log_msg({"name": "iterating_dataset", "ph": "E"}))
             self.on_demand_bytes = True  # reset on_demand_bytes to True
             raise StopIteration
 
@@ -502,16 +489,23 @@ class StreamingDataset(IterableDataset):
         # Get the first index
         index = self.upcoming_indexes.pop(0)
 
+        chunk_indexes = None if self.has_triggered_download else self.worker_chunks[self.worker_next_chunk_index - 1 :]
+        is_last_index = (self.worker_next_chunk_index) == self.num_chunks and len(self.upcoming_indexes) == 0
+        chunk_index = self.worker_chunks[self.worker_next_chunk_index - 1]
+        chunk_size = (
+            self.worker_intervals[self.worker_next_chunk_index - 1][2]
+            - self.worker_intervals[self.worker_next_chunk_index - 1][1]
+        )
+
         # Call the `__getitem__` method.
         data = self.__getitem__(
             ChunkedIndex(
                 index=index,
-                chunk_index=self.worker_chunks[self.worker_next_chunk_index - 1],
+                chunk_index=chunk_index,
                 # We provide the chunks indexes only one the first
-                chunk_indexes=None
-                if self.has_triggered_download
-                else self.worker_chunks[self.worker_next_chunk_index - 1 :],
-                is_last_index=(self.worker_next_chunk_index) == self.num_chunks and len(self.upcoming_indexes) == 0,
+                chunk_indexes=chunk_indexes,
+                is_last_index=is_last_index,
+                chunk_size=chunk_size,
             )
         )
 
