@@ -45,8 +45,8 @@ Transform                              Optimize
 
 &nbsp;
 
-# Transform data at scale. Optimize for fast model training.
-LitData scales [data processing tasks](#transform-datasets) (data scraping, image resizing, distributed inference, embedding creation) on local or cloud machines. It also enables [optimizing datasets](#speed-up-model-training) to accelerate AI model training and work with large remote datasets without local loading.
+# Why LitData?
+People often focus on optimizing kernels to speed up model training but overlook data loading. Training frequently slows down because datasets are too large to fit on disk, consist of millions of small files, or stream slowly from the cloud. LitData provides tools to preprocess and optimize datasets into a format that streams efficiently from any cloud or local source. It also includes a map operator for distributed data processing before optimization. This makes data pipelines faster, cloud-agnostic, and can improve training throughput by up to 20×.
 
 &nbsp;
 
