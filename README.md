@@ -46,7 +46,7 @@ Transform                              Optimize
 &nbsp;
 
 # Why LitData?
-People often focus on optimizing kernels to speed up model training but overlook data loading. Training frequently slows down because datasets are too large to fit on disk, consist of millions of small files, or stream slowly from the cloud. LitData provides tools to preprocess and optimize datasets into a format that streams efficiently from any cloud or local source. It also includes a map operator for distributed data processing before optimization. This makes data pipelines faster, cloud-agnostic, and can improve training throughput by up to 20×.
+Speeding up model training involves more than kernel tuning. Data loading frequently slows down training, because datasets are too large to fit on disk, consist of millions of small files, or stream slowly from the cloud. LitData provides tools to preprocess and optimize datasets into a format that streams efficiently from any cloud or local source. It also includes a map operator for distributed data processing before optimization. This makes data pipelines faster, cloud-agnostic, and can improve training throughput by up to 20×.
 
 &nbsp;
 
