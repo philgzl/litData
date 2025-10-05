@@ -1,10 +1,11 @@
 <div align="center">
+<h1>
+  Speed up model training by fixing data loading
+</h1>  
 <img src="https://pl-flash-data.s3.amazonaws.com/lit_data_logo.webp" alt="LitData" width="800px"/>
 
 &nbsp;
 &nbsp;
-
-**Speed up model training by fixing data loading.**
 
 <pre>
 Transform                              Optimize
