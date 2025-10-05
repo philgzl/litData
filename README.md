@@ -4,9 +4,7 @@
 &nbsp;
 &nbsp;
 
-**Transform datasets at scale.    
-Optimize data for fast AI model training.**
-
+**Speed up model training by fixing data loading.**
 
 <pre>
 Transform                              Optimize
