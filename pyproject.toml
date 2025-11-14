@@ -13,13 +13,10 @@
 # limitations under the License.
 
 [build-system]
-requires = [
-  "setuptools",
-  "wheel",
-]
+requires = [ "setuptools", "wheel" ]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 120
 # Exclude a variety of commonly ignored directories.
 exclude = [
@@ -48,8 +45,10 @@ lint.extend-select = [
   "SIM",    # see: https://pypi.org/project/flake8-simplify
 ]
 lint.ignore = [
-  "E731", # Do not assign a lambda expression, use a def
-  "S101", # todo: Use of `assert` detected
+  "E731",  # Do not assign a lambda expression, use a def
+  "S101",  # todo: Use of `assert` detected
+  "UP007", # todo: non-pep604-annotation-union
+  "UP045", # todo: non-pep604-annotation-optional
 ]
 lint.per-file-ignores."examples/**" = [
   "D100",
@@ -119,16 +118,8 @@ wrap-descriptions = 120
 blank = true
 
 [tool.pytest.ini_options]
-testpaths = [
-  "tests",
-]
-norecursedirs = [
-  ".git",
-  ".github",
-  "dist",
-  "build",
-  "docs",
-]
+testpaths = [ "tests" ]
+norecursedirs = [ ".git", ".github", "dist", "build", "docs" ]
 addopts = [
   "--strict-markers",
   "--doctest-modules",
@@ -136,12 +127,8 @@ addopts = [
   "--disable-pytest-warnings",
   "--ignore=legacy/checkpoints",
 ]
-markers = [
-  "cloud: Run the cloud tests for example",
-]
-filterwarnings = [
-  "error::FutureWarning",
-]
+markers = [ "cloud: Run the cloud tests for example" ]
+filterwarnings = [ "error::FutureWarning" ]
 xfail_strict = true
 junit_duration_report = "call"
 
@@ -155,9 +142,7 @@ exclude_lines = [
 ]
 
 [tool.mypy]
-files = [
-  "src",
-]
+files = [ "src" ]
 # This section is for folders with "-" as they are not valid python modules
 exclude = [
   "src/litdata/utilities/_pytree.py",
@@ -190,6 +175,5 @@ warn_no_return = "False"
 [[tool.mypy.overrides]]
 # the list can be generated with:
 # mypy --no-error-summary 2>&1 | tr ':' ' ' | awk '{print $1}' | sort | uniq | sed 's/\.py//g; s|src/||g;  s|\/|\.|g' | xargs -I {} echo '"{}",'
-module = [
-]
+module = [  ]
 ignore_errors = "True"
